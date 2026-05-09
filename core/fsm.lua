@@ -1,0 +1,377 @@
+-- core/fsm.lua  --  the turn-in state machine
+--
+-- States (tracker.state):
+--   nil              idle, no run in flight
+--   'TELEPORTING'    cast TP-to-Skov_Temis, waiting for zone change
+--   'WALK_NPC'       moving toward Tree NPC (live-stream actor)
+--   'INTERACT_NPC'   re-firing interact_object until panel verifies open
+--   'API_CLAIMING'   used quest_reward.pick_and_accept; verify quest gone
+--   'CLICK_CARD'     fallback path: clicked reward card; pause before Accept
+--   'CLICK_ACCEPT'   fallback path: clicked Accept; verify quest gone
+--   'WAIT_RETRY'     short pause between retries
+--   'DONE'           terminal success; fires callback next tick
+--   'FAILED'         terminal failure; fires callback next tick
+--
+-- Per-frame budget: every branch is O(1) state checks plus at most one
+-- quest scan + actor scan.  No allocations in the hot path; no os.execute
+-- or io.popen.  See feedback_lua_perf.md for why this matters.
+
+local log      = require 'core.log'
+local whispers = require 'core.whispers'
+local tracker  = require 'core.tracker'
+
+local M = {}
+
+-- Tunables
+local INTERACT_RANGE              = 30.0    -- D4 walks the last few yards
+local TELEPORT_TIMEOUT_S          = 30.0
+local TELEPORT_RECAST_DEBOUNCE_S  = 3.0     -- mirrors AlfredTheButler/teleport.lua
+local TELEPORT_SPELL_ID           = 186139  -- "casting town portal" anim
+local NPC_PANEL_TIMEOUT_S         = 10.0
+local INTERACT_RETRY_INTERVAL_S   = 1.5
+local CARD_TO_ACCEPT_S            = 1.0
+local CLAIM_VERIFY_TIMEOUT_S      = 5.0
+local INTER_ATTEMPT_S             = 1.5
+local MAX_RETRIES                 = 3
+
+-- Per-zone latch logic: once we successfully turn in, set last_zone_handled.
+-- Drop the latch the moment the player leaves that zone.  Without this,
+-- the gate sticks across every TP back to town.
+local function update_zone_latch(cur_zone)
+    if cur_zone == tracker.last_observed_zone then return end
+    if tracker.last_observed_zone == tracker.last_zone_handled then
+        tracker.last_zone_handled = nil
+    end
+    tracker.last_observed_zone = cur_zone
+end
+
+-- Best-effort path-to-actor.  Tries pathfinder.move_to_cpathfinder first
+-- (stream-friendly), then pathfinder.request_move.  No-op if neither is
+-- exposed on this host.
+local function move_toward_actor(actor)
+    if not actor or not actor.get_position then return end
+    local p = actor:get_position()
+    if not p then return end
+    if pathfinder then
+        if pathfinder.move_to_cpathfinder then
+            pcall(pathfinder.move_to_cpathfinder, p)
+            return
+        end
+        if pathfinder.request_move then
+            pcall(pathfinder.request_move, p)
+        end
+    end
+end
+
+local function in_interact_range(actor)
+    return whispers.player_dist_sq(actor) <= INTERACT_RANGE * INTERACT_RANGE
+end
+
+-- Begin a fresh attempt.  Increments the attempt counter; the caller is
+-- responsible for setting tracker.state to whatever the next stage is.
+local function begin_attempt(settings)
+    tracker.attempts        = (tracker.attempts or 0) + 1
+    tracker.interacts_fired = 0
+    tracker.last_interact_t = nil
+    tracker.interact_npc    = nil
+    log.debug(settings, string.format('attempt %d/%d', tracker.attempts, MAX_RETRIES))
+end
+
+-- Drop the FSM into WAIT_RETRY (or FAILED if out of retries).  Always
+-- sends Escape first so any partial UI is closed before the next attempt.
+local function fail_or_retry(now, reason, settings)
+    whispers.send_escape()
+    if tracker.attempts >= MAX_RETRIES then
+        log.info(string.format('giving up: %s (after %d attempt(s))', reason, tracker.attempts))
+        tracker.state   = 'FAILED'
+        tracker.state_t = now
+        return
+    end
+    log.debug(settings, 'retry: ' .. reason)
+    tracker.state   = 'WAIT_RETRY'
+    tracker.state_t = now
+end
+
+-- Try to fire the reward selection.  Prefers quest_reward.pick_and_accept;
+-- falls back to fractional clicks if the API isn't on this host or the
+-- user has overridden via use_click_fallback=true (defensive).
+-- Sets tracker.state to either 'API_CLAIMING' (one-call API path) or
+-- 'CLICK_CARD' (two-click fallback path; second click happens on next tick).
+local function fire_claim(settings, now)
+    if whispers.has_quest_reward_api() and not settings.use_click_fallback then
+        local idx = settings.reward_index or 0
+        local ok, ret = pcall(quest_reward.pick_and_accept, idx)
+        if ok and ret then
+            log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok', idx))
+            tracker.state   = 'API_CLAIMING'
+            tracker.state_t = now
+            return
+        end
+        log.debug(settings, 'quest_reward.pick_and_accept failed -- using click fallback')
+    end
+    -- Click fallback path.
+    whispers.click_at_frac(settings.reward_x_frac, settings.reward_y_frac)
+    log.debug(settings, string.format('clicked reward card at (%.2f, %.2f)',
+        settings.reward_x_frac, settings.reward_y_frac))
+    tracker.state   = 'CLICK_CARD'
+    tracker.state_t = now
+end
+
+-- Terminal-state finalize: fire callback, log, reset.  After this, FSM is
+-- back to idle; the next tick won't re-enter any state branch.
+--
+-- Why we latch the zone on FAILURE too: without it, the autofire loop in
+-- main.lua sees `ready == true` + in-town + no latch and immediately
+-- re-fires the FSM on the next pulse, busy-looping on whatever caused
+-- the failure (panel won't open, NPC dropped from stream, etc.) until
+-- the player leaves and re-enters the zone.  Matches WarMachine's
+-- behavior in tasks/warplan/whisper_turnin.lua.
+local function finalize(settings, cur_zone, success)
+    local cb     = tracker.external_callback
+    local result = success and 'success' or 'failed'
+    log.info(string.format('run finished: %s (%d attempt(s), reason=%s)',
+        result, tracker.attempts, tracker.last_reason or ''))
+    tracker.last_zone_handled = cur_zone
+    tracker.last_result       = result
+    tracker.last_result_t     = (get_time_since_inject and get_time_since_inject()) or 0
+    tracker.all_task_done     = true
+    tracker.reset_run()
+    if cb then
+        pcall(cb, result)
+    end
+end
+
+-- Single tick.  Called from main_pulse every frame while a run is in
+-- flight.  Keep every branch O(1) plus at most one quest scan / actor
+-- scan -- nothing in here may iterate large state.
+M.tick = function (settings)
+    -- Pause acts as a soft freeze: no progression, but state is preserved.
+    -- A later resume() picks up where we left off (with the same caller's
+    -- callback still pending).
+    if tracker.paused then return end
+
+    local now      = (get_time_since_inject and get_time_since_inject()) or 0
+    local cur_zone = whispers.current_zone()
+    update_zone_latch(cur_zone)
+
+    -- ---- Terminal states fire callback then reset ----
+    if tracker.state == 'DONE' then
+        finalize(settings, cur_zone, true)
+        return
+    end
+    if tracker.state == 'FAILED' then
+        finalize(settings, cur_zone, false)
+        return
+    end
+
+    -- ---- WAIT_RETRY: short pause then fall through into next attempt ----
+    if tracker.state == 'WAIT_RETRY' then
+        if (now - (tracker.state_t or 0)) < INTER_ATTEMPT_S then return end
+        tracker.state   = nil
+        tracker.state_t = nil
+        -- fall through to "state == nil" branch below
+    end
+
+    -- ---- TELEPORTING: re-cast on debounce, wait for arrival ----
+    if tracker.state == 'TELEPORTING' then
+        if cur_zone == 'Skov_Temis' then
+            log.debug(settings, 'arrived in Skov_Temis')
+            tracker.state   = nil    -- start a fresh attempt in town
+            tracker.state_t = nil
+            -- fall through to "state == nil" branch below
+        else
+            local elapsed = now - (tracker.state_t or 0)
+            if elapsed >= TELEPORT_TIMEOUT_S then
+                log.info('teleport timed out')
+                tracker.state   = 'FAILED'
+                tracker.state_t = now
+                return
+            end
+            -- Re-cast TP if not currently casting and debounce elapsed.
+            local lp = get_local_player and get_local_player() or nil
+            local casting = false
+            if lp and lp.get_active_spell_id then
+                local sid = lp:get_active_spell_id()
+                if sid == TELEPORT_SPELL_ID then casting = true end
+            end
+            if (not casting)
+                and teleport_to_waypoint
+                and (now - (tracker.tp_last_cast_t or -math.huge)) >= TELEPORT_RECAST_DEBOUNCE_S
+            then
+                pcall(teleport_to_waypoint, settings.teleport_target_sno or 0x1CE51E)
+                tracker.tp_last_cast_t = now
+                log.debug(settings, 'teleport_to_waypoint cast')
+            end
+            return
+        end
+    end
+
+    -- After this point we expect to be in a whisper town.  If we drift
+    -- out mid-sequence (mount + zone change), bail.
+    if tracker.state ~= nil and not whispers.in_whisper_town() then
+        log.info('left whisper town mid-sequence -- aborting')
+        tracker.state   = 'FAILED'
+        tracker.state_t = now
+        return
+    end
+
+    -- ---- API_CLAIMING: panel was claimed via API; verify quest gone ----
+    if tracker.state == 'API_CLAIMING' then
+        if not whispers.is_bounty_quest_present() then
+            tracker.state   = 'DONE'
+            tracker.state_t = now
+            return
+        end
+        if (now - (tracker.state_t or 0)) < CLAIM_VERIFY_TIMEOUT_S then return end
+        fail_or_retry(now, 'quest still in log after API claim', settings)
+        return
+    end
+
+    -- ---- CLICK_CARD: fallback path; pause then click Accept ----
+    if tracker.state == 'CLICK_CARD' then
+        if (now - (tracker.state_t or 0)) < CARD_TO_ACCEPT_S then return end
+        whispers.click_at_frac(settings.accept_x_frac, settings.accept_y_frac)
+        log.debug(settings, string.format('clicked Accept at (%.2f, %.2f)',
+            settings.accept_x_frac, settings.accept_y_frac))
+        tracker.state   = 'CLICK_ACCEPT'
+        tracker.state_t = now
+        return
+    end
+
+    -- ---- CLICK_ACCEPT: fallback path; verify quest gone ----
+    if tracker.state == 'CLICK_ACCEPT' then
+        if not whispers.is_bounty_quest_present() then
+            tracker.state   = 'DONE'
+            tracker.state_t = now
+            return
+        end
+        if (now - (tracker.state_t or 0)) < CLAIM_VERIFY_TIMEOUT_S then return end
+        fail_or_retry(now, 'quest still in log after fallback claim', settings)
+        return
+    end
+
+    -- ---- WALK_NPC: moving to NPC; transition to INTERACT_NPC when close ----
+    if tracker.state == 'WALK_NPC' then
+        local npc = tracker.interact_npc
+        if not npc or not (npc.is_interactable and npc:is_interactable()) then
+            -- Re-find; the cached actor may have dropped from stream.
+            npc = whispers.find_tree_npc()
+            tracker.interact_npc = npc
+        end
+        if not npc then
+            -- No NPC visible.  Could just be late stream populate; wait
+            -- a bit before failing.
+            if (now - (tracker.state_t or 0)) >= NPC_PANEL_TIMEOUT_S then
+                fail_or_retry(now, 'NPC never appeared in stream', settings)
+            end
+            return
+        end
+        if in_interact_range(npc) then
+            -- Fire first interact and transition.
+            pcall(interact_object, npc)
+            tracker.interacts_fired = 1
+            tracker.last_interact_t = now
+            tracker.state           = 'INTERACT_NPC'
+            tracker.state_t         = now
+            log.debug(settings, 'in range; first interact_object fired')
+            return
+        end
+        move_toward_actor(npc)
+        return
+    end
+
+    -- ---- INTERACT_NPC: re-fire interact on cadence; verify panel open ----
+    if tracker.state == 'INTERACT_NPC' then
+        if whispers.reward_panel_open() then
+            log.debug(settings, 'reward panel verified open')
+            fire_claim(settings, now)
+            return
+        end
+        local elapsed = now - (tracker.state_t or 0)
+        if elapsed >= NPC_PANEL_TIMEOUT_S then
+            fail_or_retry(now, 'reward panel never opened', settings)
+            return
+        end
+        if (now - (tracker.last_interact_t or 0)) >= INTERACT_RETRY_INTERVAL_S then
+            local npc = tracker.interact_npc
+            if not npc or not (npc.is_interactable and npc:is_interactable()) then
+                npc = whispers.find_tree_npc()
+                tracker.interact_npc = npc
+            end
+            if npc then
+                pcall(interact_object, npc)
+                tracker.interacts_fired = (tracker.interacts_fired or 0) + 1
+                tracker.last_interact_t = now
+                log.debug(settings, 'interact_object re-fire #' .. tracker.interacts_fired)
+            end
+        end
+        return
+    end
+
+    -- ---- state == nil: starting fresh attempt ----
+    -- If the panel is somehow already open (manual interact, sticky from
+    -- prior run), skip straight to claim.
+    if whispers.reward_panel_open() then
+        begin_attempt(settings)
+        fire_claim(settings, now)
+        return
+    end
+
+    -- Find the NPC; walk if too far, interact if in range.
+    local npc = whispers.find_tree_npc()
+    if not npc then
+        -- Edge case: in town but NPC not in stream yet (just-arrived).
+        -- Bump the attempt counter and park in WALK_NPC -- the WALK_NPC
+        -- branch will retry the find on subsequent ticks.
+        begin_attempt(settings)
+        tracker.interact_npc = nil
+        tracker.state        = 'WALK_NPC'
+        tracker.state_t      = now
+        log.debug(settings, 'NPC not yet in stream; parking in WALK_NPC to retry')
+        return
+    end
+    begin_attempt(settings)
+    tracker.interact_npc = npc
+    if in_interact_range(npc) then
+        pcall(interact_object, npc)
+        tracker.interacts_fired = 1
+        tracker.last_interact_t = now
+        tracker.state           = 'INTERACT_NPC'
+        tracker.state_t         = now
+        log.debug(settings, 'NPC in range at start; interact fired')
+    else
+        move_toward_actor(npc)
+        tracker.state   = 'WALK_NPC'
+        tracker.state_t = now
+        log.debug(settings, 'walking to NPC')
+    end
+end
+
+-- Kick off a new run.  Sets state to 'TELEPORTING' if `with_tp` and the
+-- player isn't already in a whisper town; otherwise jumps straight into
+-- the in-town flow on the next tick.
+M.start = function (settings, reason, with_tp, callback)
+    tracker.running         = true
+    tracker.last_reason     = reason or 'auto'
+    tracker.external_callback = callback
+    tracker.attempts        = 0
+    tracker.all_task_done   = false
+    local now = (get_time_since_inject and get_time_since_inject()) or 0
+    if with_tp and not whispers.in_whisper_town() then
+        tracker.state           = 'TELEPORTING'
+        tracker.state_t         = now
+        tracker.tp_last_cast_t  = nil    -- force immediate first cast
+        log.info('starting run with TP-to-Temis (reason=' .. tracker.last_reason .. ')')
+    else
+        tracker.state   = nil    -- next tick falls into start-of-attempt
+        tracker.state_t = nil
+        log.info('starting run in town (reason=' .. tracker.last_reason .. ')')
+    end
+end
+
+-- True while a run is in flight (i.e. callers should yield).
+M.is_running = function ()
+    return tracker.running == true
+end
+
+return M

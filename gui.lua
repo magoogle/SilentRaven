@@ -42,7 +42,7 @@ gui.plugin_version = plugin_version
 gui.plugin_author  = plugin_author
 
 function gui.render()
-    if not gui.elements.main_tree:push(plugin_author .. ' | SilentRaven | v' .. plugin_version) then
+    if not gui.elements.main_tree:push('SilentRaven v' .. plugin_version .. ' by ' .. plugin_author) then
         return
     end
 

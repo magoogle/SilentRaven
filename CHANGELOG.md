@@ -4,6 +4,19 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 
 ## [Unreleased]
 
+### Added (live-validated against second S09 dump)
+- **Catalog now ships 21 BountyMetaCache + Whisper Cache SNOs** with explicit `legendary` flags. Live dump from the user (panel open, count=4) showed:
+  - `[1] sno=2102725 BountyMeta_Cache_Gold_Upgraded` → was legendary; now classified as `slot=gold legendary=true (catalog:legendary=true)`
+  - `[2] sno=598510  BountyMeta_Cache_Chaos`         → now classified as `slot=chaos legendary=false`
+  - `[3] sno=1087557 BountyMeta_Cache_2HWeapons`     → now classified as `slot=weapons_2h` (was already correct via SNO)
+  - `[4] sno=1087555 BountyMeta_Cache_Gloves`        → unchanged
+- New `gold` and `chaos` slots in `KNOWN_SLOTS` with priority sliders (gold defaults to 7 since it's universally useful; chaos defaults to 5).
+- `_Upgraded` added to `LEGENDARY_NAME_TOKENS` for fallback name detection on cache SNOs not yet in the embedded catalog.
+- Catalog lookup is now the **first** rung of `is_legendary` — short-circuits with evidence `catalog:legendary=true|false` when the SNO is known. Heuristic field/name probes only fire for unknown SNOs.
+
+### Notes
+- The host's live entry table only carries `{sno, internal_name, valid}` — no rarity/quality/tier extras (verified by the empty `extras:` line in the dump). Catalog-by-SNO is the only reliable legendary signal until that changes; embedded mini-catalog is the fallback.
+
 ### Added
 - **Priority-based reward picking.** New `core/rewards.lua` module: SNO-catalog slot mapping (lifted from LooteerV3 v20260509 — 9 known BountyMetaCache SNOs covering Helms / Chest / Legs / Gloves / Boots / Rings / Amulets / 1H Weapons / 2H Weapons), `internal_name` pattern fallback for unknown caches, multi-field legendary detection (probes `legendary`/`is_legendary`/`is_unique`/`guaranteed_legendary`/`is_ancestral`/`rarity`/`quality`/`tier`/`class`/`rank`/`r` then falls back to name-pattern matching).
 - "Auto-pick by priority" GUI toggle plus per-slot priority sliders (0..10 each) and a "Prefer legendary" toggle with adjustable bonus weight (0..100). When auto-pick is on, the FSM scores every live `enumerate()` entry and claims the winner; ties resolve to the lowest index. Falls back to the fixed `Reward card index` when scoring returns no winner (e.g. all slots set to 0).

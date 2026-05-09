@@ -39,6 +39,8 @@ local M = {
         amulets    = 5,
         weapons_1h = 5,
         weapons_2h = 5,
+        gold       = 7,    -- gold caches default a bit higher; gold is universally useful
+        chaos      = 5,
         other      = 1,
     },
 
@@ -87,6 +89,8 @@ M.update = function (gui)
     if g.priority_amulets_slider    then M.slot_priorities.amulets    = g.priority_amulets_slider:get()    end
     if g.priority_weapons_1h_slider then M.slot_priorities.weapons_1h = g.priority_weapons_1h_slider:get() end
     if g.priority_weapons_2h_slider then M.slot_priorities.weapons_2h = g.priority_weapons_2h_slider:get() end
+    if g.priority_gold_slider       then M.slot_priorities.gold       = g.priority_gold_slider:get()       end
+    if g.priority_chaos_slider      then M.slot_priorities.chaos      = g.priority_chaos_slider:get()      end
     if g.priority_other_slider      then M.slot_priorities.other      = g.priority_other_slider:get()      end
 end
 

@@ -28,15 +28,41 @@ local M = {}
 -- M.is_legendary below for how we probe.
 -- ---------------------------------------------------------------------------
 local CACHE_CATALOG = {
-    [1087411] = { name = 'Collection of Helms',              slot = 'helms' },
-    [1087549] = { name = 'Collection of Chestplates',        slot = 'chest' },
-    [1087551] = { name = 'Collection of Leg Guards',         slot = 'legs' },
-    [1087553] = { name = 'Collection of Boots',              slot = 'boots' },
-    [1087555] = { name = 'Collection of Gauntlets',          slot = 'gloves' },
-    [1087557] = { name = 'Collection of Two-Handed Weapons', slot = 'weapons_2h' },
-    [1087567] = { name = 'Collection of One-handed Weapons', slot = 'weapons_1h' },
-    [1087570] = { name = 'Collection of Rings',              slot = 'rings' },
-    [1087572] = { name = 'Collection of Amulets',            slot = 'amulets' },
+    -- Regular BountyMetaCache (armor/weapons/jewelry).  All r=0 in the
+    -- master catalog -- "regular" is the absence of a "Greater " prefix
+    -- on the cache, NOT a rarity flag.
+    [1087411] = { name = 'Collection of Helms',                 slot = 'helms',      legendary = false },
+    [1087549] = { name = 'Collection of Chestplates',           slot = 'chest',      legendary = false },
+    [1087551] = { name = 'Collection of Leg Guards',            slot = 'legs',       legendary = false },
+    [1087553] = { name = 'Collection of Boots',                 slot = 'boots',      legendary = false },
+    [1087555] = { name = 'Collection of Gauntlets',             slot = 'gloves',     legendary = false },
+    [1087557] = { name = 'Collection of Two-Handed Weapons',    slot = 'weapons_2h', legendary = false },
+    [1087567] = { name = 'Collection of One-handed Weapons',    slot = 'weapons_1h', legendary = false },
+    [1087570] = { name = 'Collection of Rings',                 slot = 'rings',      legendary = false },
+    [1087572] = { name = 'Collection of Amulets',               slot = 'amulets',    legendary = false },
+
+    -- "Greater" BountyMetaCache.  Same r=0 as regulars in the catalog
+    -- so the only legendary signal at this level is the name prefix --
+    -- we hard-code legendary=true here so the runtime doesn't have to
+    -- re-classify by name on every claim.
+    [1092131] = { name = 'Greater Collection of Helms',              slot = 'helms',      legendary = true },
+    [1092135] = { name = 'Greater Collection of One-handed Weapons', slot = 'weapons_1h', legendary = true },
+    [1092140] = { name = 'Greater Collection of Two-Handed Weapons', slot = 'weapons_2h', legendary = true },
+    [1092142] = { name = 'Greater Collection of Amulets',            slot = 'amulets',    legendary = true },
+    [1092145] = { name = 'Greater Collection of Boots',              slot = 'boots',      legendary = true },
+    [1092149] = { name = 'Greater Collection of Chestplates',        slot = 'chest',      legendary = true },
+    [1092151] = { name = 'Greater Collection of Gauntlets',          slot = 'gloves',     legendary = true },
+    [1092153] = { name = 'Greater Collection of Leg Guards',         slot = 'legs',       legendary = true },
+    [1092155] = { name = 'Greater Collection of Rings',              slot = 'rings',      legendary = true },
+
+    -- Whisper Cache type (Chaos = wildcard random gear, Gold = gold rewards).
+    -- Here the catalog DOES carry rarity: r=3 is legendary.
+    -- Live-validated SNOs from a S09 dump:
+    --   598510  internal_name=BountyMeta_Cache_Chaos         (regular)
+    --   2102725 internal_name=BountyMeta_Cache_Gold_Upgraded (legendary; user-confirmed)
+    [598510]  = { name = 'Collection of Chaos',         slot = 'chaos', legendary = false },
+    [1092147] = { name = 'Greater Collection of Chaos', slot = 'chaos', legendary = true },
+    [2102725] = { name = 'Material Collection of Gold', slot = 'gold',  legendary = true },
 }
 
 M.CACHE_CATALOG = CACHE_CATALOG
@@ -49,6 +75,7 @@ local KNOWN_SLOTS = {
     'helms', 'chest', 'legs', 'gloves', 'boots',
     'rings', 'amulets',
     'weapons_1h', 'weapons_2h',
+    'gold',  'chaos',
     'other',
 }
 M.KNOWN_SLOTS = KNOWN_SLOTS
@@ -64,6 +91,8 @@ M.SLOT_DISPLAY = {
     amulets     = 'Amulets',
     weapons_1h  = 'One-Hand Weapons',
     weapons_2h  = 'Two-Hand Weapons',
+    gold        = 'Gold (currency cache)',
+    chaos       = 'Chaos (wildcard gear)',
     other       = 'Other / Unknown',
 }
 
@@ -97,17 +126,26 @@ local SLOT_PATTERNS = {
     { 'twohanded',   'weapons_2h' },
     { 'two-handed',  'weapons_2h' },
     { '2handed',     'weapons_2h' },
+    { '2hweapons',   'weapons_2h' },     -- internal_name form: BountyMeta_Cache_2HWeapons
+    { '2hweapon',    'weapons_2h' },
     { 'onehanded',   'weapons_1h' },
     { 'one-handed',  'weapons_1h' },
     { '1handed',     'weapons_1h' },
+    { '1hweapons',   'weapons_1h' },
+    { '1hweapon',    'weapons_1h' },
     { 'weapons',     'weapons_1h' },     -- generic weapons -> 1h bucket
     { 'weapon',      'weapons_1h' },
+    { 'gold',        'gold' },
+    { 'chaos',       'chaos' },
     { 'legs',        'legs' },           -- last so legguards/pants match first
 }
 
+-- Internal-name tokens that signal a legendary cache.  Live-validated:
+--   'upgraded' on `BountyMeta_Cache_Gold_Upgraded` (sno 2102725)
+--   'great'   matches 'Greater Collection of *' family
 local LEGENDARY_NAME_TOKENS = {
     'legendary', 'ancestral', 'guaranteed', 'gilded',
-    'great', 'sacred', 'unique',
+    'great', 'sacred', 'unique', 'upgraded',
 }
 
 local function strip_for_slot_match(internal_name)
@@ -180,6 +218,13 @@ end
 -- confirm the heuristic.
 M.is_legendary = function (entry)
     if type(entry) ~= 'table' then return false, 'no-entry' end
+
+    -- 1. SNO catalog -- authoritative, ships hard-coded legendary flag.
+    if type(entry.sno) == 'number' and CACHE_CATALOG[entry.sno] then
+        local meta = CACHE_CATALOG[entry.sno]
+        if meta.legendary == true  then return true,  'catalog:legendary=true'  end
+        if meta.legendary == false then return false, 'catalog:legendary=false' end
+    end
 
     -- Boolean fields the host MIGHT expose.
     if entry.legendary == true            then return true, 'field:legendary' end

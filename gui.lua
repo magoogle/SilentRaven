@@ -50,6 +50,8 @@ gui.elements = {
     priority_amulets_slider    = si(0, 10, 5, 'pri_amulets'),
     priority_weapons_1h_slider = si(0, 10, 5, 'pri_weapons_1h'),
     priority_weapons_2h_slider = si(0, 10, 5, 'pri_weapons_2h'),
+    priority_gold_slider       = si(0, 10, 7, 'pri_gold'),
+    priority_chaos_slider      = si(0, 10, 5, 'pri_chaos'),
     priority_other_slider      = si(0, 10, 1, 'pri_other'),
 
     fallback_tree              = tree_node:new(1),
@@ -111,8 +113,10 @@ function gui.render()
         gui.elements.priority_boots_slider     :render('Boots',             'Priority weight for Collection of Boots (sno 1087553).')
         gui.elements.priority_rings_slider     :render('Rings',             'Priority weight for Collection of Rings (sno 1087570).')
         gui.elements.priority_amulets_slider   :render('Amulets',           'Priority weight for Collection of Amulets (sno 1087572).')
-        gui.elements.priority_weapons_1h_slider:render('One-Hand Weapons',  'Priority weight for Collection of One-handed Weapons (sno 1087567).')
-        gui.elements.priority_weapons_2h_slider:render('Two-Hand Weapons',  'Priority weight for Collection of Two-Handed Weapons (sno 1087557).')
+        gui.elements.priority_weapons_1h_slider:render('One-Hand Weapons',  'Priority weight for Collection of One-handed Weapons (sno 1087567 / Greater 1092135).')
+        gui.elements.priority_weapons_2h_slider:render('Two-Hand Weapons',  'Priority weight for Collection of Two-Handed Weapons (sno 1087557 / Greater 1092140).')
+        gui.elements.priority_gold_slider      :render('Gold (currency)',   'Priority weight for the gold cache (Material Collection of Gold, sno 2102725 -- legendary). Defaults to 7 because gold is universally useful.')
+        gui.elements.priority_chaos_slider     :render('Chaos (wildcard)',  'Priority weight for the random-gear Chaos cache (sno 598510 / Greater 1092147).')
         gui.elements.priority_other_slider     :render('Other / Unknown',   'Priority weight for any cache that doesn\'t match a known slot (defensive against future-season caches).')
         gui.elements.priority_tree:pop()
     end

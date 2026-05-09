@@ -186,6 +186,80 @@ M.has_quest_reward_api = function ()
         and type(quest_reward.pick_and_accept) == 'function'
 end
 
+-- Diagnostic: dump every entry from quest_reward.enumerate() to console.
+-- Triggered by the "Dump reward options" GUI keybind when the panel is
+-- open -- useful for confirming the right Reward card index when D4
+-- ships 3-5 choices that vary by season.
+--
+-- Output shape (one line per entry):
+--   [SilentRaven/dump]  [<index>] sno=<hex>(<dec>) name=<internal_name> valid=<bool> [<-- SELECTED>]
+--
+-- Always safe to call: gracefully degrades when the host doesn't expose
+-- quest_reward / individual sub-functions.  Not on a hot path -- only
+-- fires on user keybind, never per-frame.
+M.dump_rewards = function ()
+    if not console or not console.print then return end
+    local PFX = '[SilentRaven/dump] '
+
+    if not quest_reward then
+        console.print(PFX .. 'quest_reward API not exposed by this host')
+        return
+    end
+
+    local open = false
+    if type(quest_reward.is_open) == 'function' then
+        local ok, ret = pcall(quest_reward.is_open)
+        if ok then open = (ret == true) end
+    end
+    console.print(PFX .. 'panel open: ' .. tostring(open))
+
+    local sel = -1
+    if type(quest_reward.selected_index) == 'function' then
+        local ok, ret = pcall(quest_reward.selected_index)
+        if ok and type(ret) == 'number' then sel = ret end
+    end
+    console.print(PFX .. 'selected index: ' .. tostring(sel))
+
+    if type(quest_reward.enumerate) ~= 'function' then
+        console.print(PFX .. 'enumerate() not exposed; cannot list entries')
+        return
+    end
+    local ok, entries = pcall(quest_reward.enumerate)
+    if not ok or not entries then
+        console.print(PFX .. 'enumerate() returned nothing')
+        return
+    end
+
+    -- Sort keys so output is stable across calls.  Numeric keys first,
+    -- then strings (defensive -- the API stub says number keys, but real
+    -- hosts have surprised us before).
+    local keys = {}
+    for k, _ in pairs(entries) do keys[#keys + 1] = k end
+    table.sort(keys, function (a, b)
+        local na, nb = type(a) == 'number', type(b) == 'number'
+        if na and nb then return a < b end
+        if na ~= nb then return na end
+        return tostring(a) < tostring(b)
+    end)
+
+    console.print(PFX .. 'enumerate() count: ' .. #keys)
+    for _, k in ipairs(keys) do
+        local e = entries[k] or {}
+        local sno_str = '?'
+        if type(e.sno) == 'number' then
+            sno_str = string.format('0x%X(%d)', e.sno, e.sno)
+        elseif e.sno ~= nil then
+            sno_str = tostring(e.sno)
+        end
+        local marker = (k == sel) and ' <-- SELECTED' or ''
+        console.print(string.format('%s  [%s] sno=%s name=%s valid=%s%s',
+            PFX, tostring(k), sno_str,
+            tostring(e.internal_name or '?'),
+            tostring(e.valid),
+            marker))
+    end
+end
+
 -- True when the reward panel is on screen.  Uses quest_reward.is_open
 -- when available; falls back to objective-text matching on older hosts.
 M.reward_panel_open = function ()

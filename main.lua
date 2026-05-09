@@ -38,6 +38,7 @@ local READY_CHECK_INTERVAL_S = 0.5
 -- Manual-trigger keybind debounce (mirrors Alfred's 1s timeout).
 local MANUAL_DEBOUNCE_S      = 1.0
 local last_manual_t          = -math.huge
+local last_dump_t            = -math.huge
 
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
@@ -97,6 +98,16 @@ local function handle_manual_keybind(now)
     fsm.start(settings, 'manual', true, nil)
 end
 
+local function handle_dump_keybind(now)
+    if gui.elements.dump_rewards_keybind:get_state() ~= 1 then return end
+    if (now - last_dump_t) < MANUAL_DEBOUNCE_S then return end
+    last_dump_t = now
+    gui.elements.dump_rewards_keybind:set(false)
+    log.info('--- reward dump ---')
+    whispers.dump_rewards()
+    log.info('--- end dump ---')
+end
+
 local function main_pulse()
     settings.update(gui)
     if not settings.enabled then
@@ -113,6 +124,7 @@ local function main_pulse()
 
     local now = (get_time_since_inject and get_time_since_inject()) or 0
     handle_manual_keybind(now)
+    handle_dump_keybind(now)
 
     -- If a run is in flight, just tick the FSM.  Don't refresh "ready"
     -- (already running -- no point) and don't start anything new.

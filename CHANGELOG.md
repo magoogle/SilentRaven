@@ -4,6 +4,13 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 
 ## [Unreleased]
 
+### Added
+- "Dump reward options" GUI keybind. Press while the reward panel is open to print every `quest_reward.enumerate()` entry (index, sno, internal_name, valid, currently-selected) to console. D4 ships 3-5 cards depending on season/quest, so a live dump is the most reliable way to pick the right `Reward card index`.
+- `core/whispers.lua` exposes `M.dump_rewards()` for the same purpose; safe to call any time, gracefully degrades when the host doesn't expose `quest_reward`.
+
+### Changed
+- `Reward card index` slider range bumped from 0-2 to 0-4 to cover the full 3-5 card spread.
+
 ## [0.1] — 2026-05-09
 
 First release. **Untested live** — published for in-game validation.

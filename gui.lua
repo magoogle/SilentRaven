@@ -22,9 +22,13 @@ gui.elements = {
     debug_toggle               = cb(false, 'debug'),
 
     manual_fire_keybind        = keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_fire')),
+    dump_rewards_keybind       = keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_rewards')),
 
     reward_tree                = tree_node:new(1),
-    reward_index_slider        = si(0, 2, 0, 'reward_index'),
+    -- D4 can ship 3-5 reward choices depending on season / quest type.
+    -- Use the "Dump reward options" keybind to enumerate live entries
+    -- before picking an index, since order varies.
+    reward_index_slider        = si(0, 4, 0, 'reward_index'),
 
     fallback_tree              = tree_node:new(1),
     use_click_fallback_toggle  = cb(false, 'use_click_fallback'),
@@ -58,9 +62,12 @@ function gui.render()
     gui.elements.manual_fire_keybind:render('Manual trigger keybind',
         'Press to fire a turn-in run now (TP-to-Temis included).  Equivalent to calling SilentRavenPlugin.trigger_tasks_with_teleport(...).')
 
+    gui.elements.dump_rewards_keybind:render('Dump reward options',
+        'Print every quest_reward entry to console (index, sno, internal_name, valid, currently-selected). D4 ships 3-5 choices depending on season -- press this with the panel open to see what your character actually has, then set Reward card index accordingly.')
+
     if gui.elements.reward_tree:push('Reward selection') then
         gui.elements.reward_index_slider:render('Reward card index',
-            'Which of the three reward cards to claim (0 = leftmost, 2 = rightmost).  Order varies by season; verify in-game once.')
+            'Which reward card to claim (0 = leftmost). D4 ships 3-5 cards depending on season/quest; use Dump reward options above to see your live list before picking.')
         gui.elements.reward_tree:pop()
     end
 

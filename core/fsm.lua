@@ -112,15 +112,19 @@ local function resolve_pick_index(settings)
         for i = 1, #breakdown do
             local b = breakdown[i]
             log.debug(settings, string.format(
-                '  pick: [%s] %s slot=%s legendary=%s score=%d (%s)',
+                '  pick: [%s] %s slot=%s legendary=%s score=%d (%s)%s',
                 tostring(b.index), b.display_name, b.slot,
-                tostring(b.legendary), b.score, b.evidence))
+                tostring(b.legendary), b.score, b.evidence,
+                b.fallback and ' <-- FALLBACK' or ''))
         end
     end
     if best then
+        if score == 0 then
+            return best, 'priority(fallback first-valid)'
+        end
         return best, string.format('priority(score=%d)', score)
     end
-    return fixed, 'fixed (priority returned no winner)'
+    return fixed, 'fixed (no entries on offer)'
 end
 
 -- Try to fire the reward selection.  Prefers quest_reward.pick_and_accept;

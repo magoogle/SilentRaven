@@ -89,9 +89,23 @@ end
 
 1. Drop the `SilentRaven` directory into your QQT scripts folder (the same directory that contains `AlfredTheButler-main`, `Reaper`, etc).
 2. Restart the QQT host or reload scripts.
-3. Open the QQT menu, find the **`magoogle | SilentRaven | v0.1`** tree, toggle `Enable`.
+3. Open the QQT menu, find the **`SilentRaven v0.1 by magoogle`** tree.
+4. (Optional but recommended) Click **Reload Catalog (cloud)** to pull the latest cache classifications from `https://looter.d4data.live/d4/silentraven/caches.lua`. The repo ships a pre-built `data/caches.lua` so this works out of the box, but a season patch can add new SNOs the shipped file doesn't know about.
+5. Toggle **Enable**.
 
 Console output is the primary observability channel. Turn on `Debug logging` to see FSM transitions while calibrating.
+
+## Cache catalog
+
+SilentRaven classifies every offered turn-in card by **slot** (helms, rings, gold, ...) and **legendary** flag. The classifier looks up the entry's SNO in a catalog that has three sources, in order of preference:
+
+1. **Cloud-synced** (`data/caches.lua`) — pulled from `https://looter.d4data.live/d4/silentraven/caches.lua` by `Updater.bat`. The looter pipeline regenerates this file daily from the master LooteerV3 item catalog (currently 75 entries spanning regular + Greater + Ancestral tiers + Whisper Cache material variants). This is the recommended path.
+2. **Embedded fallback** (`core/rewards.lua` `EMBEDDED_CATALOG`) — 21 entries covering the most common BountyMetaCache + Whisper Cache families. Used when `data/caches.lua` is missing or malformed. Means the plugin still classifies correctly day-one without ever talking to the cloud.
+3. **internal_name pattern parsing** (last resort, for SNOs no source has yet) — strips known prefixes/suffixes and looks for slot keywords and legendary tokens (`legendary`, `ancestral`, `guaranteed`, `upgraded`, ...).
+
+The GUI header shows which source loaded and the last cloud-sync age. **Reload Catalog (cloud)** runs `Updater.bat` synchronously (a brief ~50–200ms cmd.exe spawn freeze) then re-loads the file; safe as a one-shot user action, debounced to 2s to prevent rapid-click pile-up.
+
+`Updater.bat` also supports `loop` mode (`Updater.bat loop` from a shell) for a 15-minute background sync if you want the catalog to track new-season SNOs without ever touching the GUI.
 
 ## GUI options
 

@@ -14,23 +14,35 @@
 local M = {}
 
 -- ---------------------------------------------------------------------------
--- BountyMetaCache catalog
+-- BountyMetaCache + Whisper Cache catalog
 --
--- Lifted from LooteerV3/data/items.lua (catalog v20260509, ~10928 entries).
--- Embedded here so SilentRaven runs even when LooteerV3 isn't loaded -- the
--- alternative was an absolute-path dofile or a fragile cross-script require.
+-- Two-tier loader:
+--   1) Try `data.caches` -- the cloud-fetched Lua module dropped by
+--      Updater.bat from https://looter.d4data.live/d4/silentraven/caches.lua.
+--      Pipeline-generated from the master LooteerV3 catalog so it tracks
+--      every season's new SNOs without code changes.
+--   2) Fallback to the embedded mini-catalog below.  This means a fresh
+--      install with no Updater run yet still has correct slot/legendary
+--      classification for the most common caches the user will see.
 --
--- LooteerV3 schema:  [sno] = { n=display_name, g=group, t=type, r=rarity }
--- All entries below have g='cache', t='BountyMetaCache', r=0 -- which means
--- rarity is NOT encoded at the SNO level.  If the host distinguishes a
--- legendary-guaranteed cache from a regular one, that signal must come from
--- a field on the live quest_reward entry, NOT from the SNO.  See
--- M.is_legendary below for how we probe.
+-- The cloud schema is the same as the embedded one:
+--   [sno] = { slot=string, legendary=bool, name=string,
+--             item_type=string?, magic_type=int? }
+-- Extra fields (item_type / magic_type) are ignored by the runtime but
+-- handy for diagnostics.
+--
+-- Schema notes for legendary detection:
+--   * BountyMetaCache armor/weapons/jewelry: magic_type stays 0 even at
+--     Greater tier; only the name prefix distinguishes Greater/Ancestral.
+--     Pipeline pre-computes the bool so we don't classify-by-name at run
+--     time.
+--   * Whisper Cache (Material/Gold/Chaos/etc.): magic_type IS reliable
+--     (r>=3 == legendary). Pipeline uses both signals.
 -- ---------------------------------------------------------------------------
-local CACHE_CATALOG = {
-    -- Regular BountyMetaCache (armor/weapons/jewelry).  All r=0 in the
-    -- master catalog -- "regular" is the absence of a "Greater " prefix
-    -- on the cache, NOT a rarity flag.
+
+-- Embedded fallback catalog -- only used when data.caches isn't present.
+-- Hand-curated from live S09 dumps + LooteerV3 catalog snippets.
+local EMBEDDED_CATALOG = {
     [1087411] = { name = 'Collection of Helms',                 slot = 'helms',      legendary = false },
     [1087549] = { name = 'Collection of Chestplates',           slot = 'chest',      legendary = false },
     [1087551] = { name = 'Collection of Leg Guards',            slot = 'legs',       legendary = false },
@@ -41,10 +53,6 @@ local CACHE_CATALOG = {
     [1087570] = { name = 'Collection of Rings',                 slot = 'rings',      legendary = false },
     [1087572] = { name = 'Collection of Amulets',               slot = 'amulets',    legendary = false },
 
-    -- "Greater" BountyMetaCache.  Same r=0 as regulars in the catalog
-    -- so the only legendary signal at this level is the name prefix --
-    -- we hard-code legendary=true here so the runtime doesn't have to
-    -- re-classify by name on every claim.
     [1092131] = { name = 'Greater Collection of Helms',              slot = 'helms',      legendary = true },
     [1092135] = { name = 'Greater Collection of One-handed Weapons', slot = 'weapons_1h', legendary = true },
     [1092140] = { name = 'Greater Collection of Two-Handed Weapons', slot = 'weapons_2h', legendary = true },
@@ -55,17 +63,131 @@ local CACHE_CATALOG = {
     [1092153] = { name = 'Greater Collection of Leg Guards',         slot = 'legs',       legendary = true },
     [1092155] = { name = 'Greater Collection of Rings',              slot = 'rings',      legendary = true },
 
-    -- Whisper Cache type (Chaos = wildcard random gear, Gold = gold rewards).
-    -- Here the catalog DOES carry rarity: r=3 is legendary.
-    -- Live-validated SNOs from a S09 dump:
-    --   598510  internal_name=BountyMeta_Cache_Chaos         (regular)
-    --   2102725 internal_name=BountyMeta_Cache_Gold_Upgraded (legendary; user-confirmed)
     [598510]  = { name = 'Collection of Chaos',         slot = 'chaos', legendary = false },
     [1092147] = { name = 'Greater Collection of Chaos', slot = 'chaos', legendary = true },
     [2102725] = { name = 'Material Collection of Gold', slot = 'gold',  legendary = true },
 }
 
-M.CACHE_CATALOG = CACHE_CATALOG
+-- Try to load the cloud-fetched catalog; fall back to embedded.  Wrapped
+-- in pcall because require() throws when the file is missing on disk OR
+-- malformed.  Both cases should leave us with the embedded catalog and
+-- a warning logged.  CATALOG_SOURCE tracks which one we ended up with --
+-- exposed via M.catalog_source for the GUI to show "synced from cloud"
+-- vs "embedded fallback".
+local CACHE_CATALOG    = EMBEDDED_CATALOG
+local CATALOG_SOURCE   = 'embedded'
+local CATALOG_LOAD_ERR = nil
+do
+    -- pcall require so a missing-file error doesn't kill module load.
+    -- If the cloud module loaded but is empty (table with no keys) we
+    -- also stay on embedded -- empty file would silently break picking.
+    local ok, mod = pcall(require, 'data.caches')
+    if ok and type(mod) == 'table' and next(mod) ~= nil then
+        CACHE_CATALOG  = mod
+        CATALOG_SOURCE = 'cloud'
+    else
+        CATALOG_LOAD_ERR = (not ok) and tostring(mod) or 'data.caches missing or empty'
+    end
+end
+
+M.CACHE_CATALOG    = CACHE_CATALOG
+M.CATALOG_SOURCE   = CATALOG_SOURCE
+M.CATALOG_LOAD_ERR = CATALOG_LOAD_ERR
+
+-- Allow the GUI/Reload-Catalog button to swap in a freshly-fetched
+-- catalog without restarting the script.  package.loaded["data.caches"]
+-- is cleared so the next require() reads the new file from disk.
+M.reload_catalog = function ()
+    package.loaded['data.caches'] = nil
+    local ok, mod = pcall(require, 'data.caches')
+    if ok and type(mod) == 'table' and next(mod) ~= nil then
+        CACHE_CATALOG  = mod
+        CATALOG_SOURCE = 'cloud'
+        CATALOG_LOAD_ERR = nil
+        M.CACHE_CATALOG  = CACHE_CATALOG
+        M.CATALOG_SOURCE = 'cloud'
+        M.CATALOG_LOAD_ERR = nil
+        return true, 'cloud'
+    end
+    -- Reload failed; keep current catalog state untouched.
+    M.CATALOG_LOAD_ERR = (not ok) and tostring(mod) or 'data.caches missing or empty'
+    return false, M.CATALOG_LOAD_ERR
+end
+
+-- Resolve absolute path to the SilentRaven plugin directory.  Needed
+-- because os.execute child processes (cmd.exe) don't reliably inherit
+-- the plugin folder as their cwd on this host -- we have to pass an
+-- absolute path to Updater.bat or it won't find data/.
+--
+-- Trick: package.searchpath('core.rewards') returns this file's own
+-- absolute path; chop off "core/rewards.lua" to get the plugin root.
+-- (Same pattern LooteerV3/core/item_filter.lua uses.)
+local function _plugin_dir()
+    local p = package.searchpath and package.searchpath('core.rewards', package.path)
+    if not p then return nil end
+    local cut = p:find('[\\/]core[\\/]rewards%.lua$')
+    if not cut then return nil end
+    -- Keep the trailing separator so callers can concatenate filenames.
+    return p:sub(1, cut + 1)
+end
+
+-- Last-sync epoch from data/last_sync.lua (written by Updater.bat).
+-- Returns nil if never synced.  Always reads from disk fresh -- never
+-- caches in package.loaded so the GUI shows the live freshness.
+M.last_sync_epoch = function ()
+    package.loaded['data.last_sync'] = nil
+    local ok, ret = pcall(require, 'data.last_sync')
+    if ok and type(ret) == 'number' then return ret end
+    return nil
+end
+
+-- Human-readable freshness string for the GUI header.
+M.last_sync_str = function ()
+    local t = M.last_sync_epoch()
+    if not t then return 'never synced' end
+    local age = (os.time and os.time() or 0) - t
+    if age < 0     then return 'sync clock skewed' end
+    if age < 60    then return string.format('%ds ago', age) end
+    if age < 3600  then return string.format('%.0fm ago', age/60) end
+    if age < 86400 then return string.format('%.1fh ago', age/3600) end
+    return string.format('%.0fd ago', age/86400)
+end
+
+-- One-shot: run Updater.bat to fetch caches.lua, then reload it.
+-- Returns (ok, source_or_err).  Safe to call ONLY from a user-triggered
+-- button click -- never per-frame.  Each cmd.exe spawn is ~50-100ms of
+-- hard freeze on Windows; rapid clicks should be debounced upstream.
+M.fetch_and_reload = function ()
+    local plug = _plugin_dir()
+    if not plug then
+        return false, 'could not resolve plugin dir (package.searchpath unavailable?)'
+    end
+    local cache_path = plug .. 'data/caches.lua'
+    local log_path   = plug .. 'data/last_sync_log.txt'
+    local bat_path   = plug .. 'Updater.bat'
+
+    -- Wipe prior log so its post-spawn existence proves the bat actually
+    -- ran (vs being silently blocked by an os.execute sandbox).
+    pcall(os.execute, string.format('del /q "%s" >NUL 2>&1', log_path))
+
+    -- The cmd /c "" outer quotes are the canonical Windows trick for
+    -- paths with spaces.  oneshot mode does a single sync then exits.
+    pcall(os.execute, string.format('cmd /c ""%s" oneshot" >NUL 2>&1', bat_path))
+
+    local log_size = 0
+    do
+        local fh = io.open(log_path, 'rb')
+        if fh then
+            fh:seek('end'); log_size = fh:seek() or 0; fh:close()
+        end
+    end
+    if log_size == 0 then
+        return false, 'Updater.bat did not appear to run (no last_sync_log.txt)'
+    end
+
+    -- Reload the catalog from disk now that Updater.bat has written it.
+    return M.reload_catalog()
+end
 
 -- Slot ids the user can configure priority for.  Keep in sync with the
 -- per-slot sliders in gui.lua.  'other' catches anything we don't
@@ -280,8 +402,15 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Score one entry using the user's settings.  Higher = better.
--- Returns 0 to mean "skip" (slot priority 0 OR entry.valid == false).
 -- Returns (score, slot, legendary, evidence) for traceability.
+--
+-- A legendary entry always scores at least `legendary_bonus_weight`
+-- (when prefer_legendary is on), even if the user set the slot
+-- priority to 0 -- the user explicitly asked that legendary cards
+-- never be skipped just because the slot wasn't on their priority
+-- list.  Score 0 is reserved for "regular card the user marked as
+-- skip"; pick_best_index has a fallback for the "all entries score 0"
+-- corner case.
 M.score_entry = function (entry, settings)
     if type(entry) ~= 'table' then return 0, 'other', false, 'no-entry' end
     local slot = M.extract_slot(entry)
@@ -292,10 +421,6 @@ M.score_entry = function (entry, settings)
     end
 
     local sp = (settings.slot_priorities and settings.slot_priorities[slot]) or 0
-    if sp <= 0 then
-        return 0, slot, legendary, evidence
-    end
-
     local score = sp
     if legendary and settings.prefer_legendary then
         score = score + (settings.legendary_bonus_weight or 0)
@@ -304,9 +429,15 @@ M.score_entry = function (entry, settings)
 end
 
 -- Pick the highest-scoring entry's index from the enumerate() table.
--- Returns (best_index, best_score, breakdown_table).  `best_index` is
--- nil if nothing scored above 0 (caller should fall back to the fixed
--- reward_index slider in that case).
+-- Returns (best_index, best_score, breakdown_table).
+--
+-- Fallback rule (per user request): if no entry scores above 0 -- i.e.
+-- every slot is set to 0 priority AND nothing on offer is legendary --
+-- pick the first valid entry rather than returning nil.  The user
+-- explicitly asked SilentRaven never refuse to claim a turn-in just
+-- because their slot priorities are all zeroed.  The breakdown row for
+-- the chosen index gets `fallback=true` so the debug log makes it
+-- obvious that's what happened.
 --
 -- Ties resolve to the lowest index (stable + matches how D4 renders
 -- duplicate cards left-to-right).
@@ -335,11 +466,30 @@ M.pick_best_index = function (entries, settings)
             evidence      = evidence,
             display_name  = M.display_name(e),
             internal_name = (e and e.internal_name) or '?',
+            fallback      = false,
         }
         if score > best_score then
             best_idx, best_score = k, score
         end
     end
+
+    -- Fallback: nothing scored.  Pick first valid entry.
+    if best_score == 0 then
+        for i, k in ipairs(keys) do
+            local e = entries[k]
+            if e and e.valid ~= false then
+                if breakdown[i] then breakdown[i].fallback = true end
+                return k, 0, breakdown
+            end
+        end
+        -- All entries were valid==false (shouldn't happen but defensive).
+        -- Pick the very first key as a last resort.
+        if keys[1] then
+            if breakdown[1] then breakdown[1].fallback = true end
+            return keys[1], 0, breakdown
+        end
+    end
+
     return best_idx, best_score, breakdown
 end
 

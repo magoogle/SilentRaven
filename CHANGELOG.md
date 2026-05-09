@@ -4,6 +4,15 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 
 ## [Unreleased]
 
+### Added (cloud catalog sync)
+- **Cloud-synced cache catalog.** `Updater.bat` (patterned on LooteerV3's) pulls `https://looter.d4data.live/d4/silentraven/caches.lua` to `data/caches.lua` next to the script. `core/rewards.lua` tries to `require 'data.caches'` first and falls back to a 21-entry embedded mini-catalog when the file is missing or malformed. `M.CATALOG_SOURCE` is exposed so the GUI header can label "cloud (synced 5m ago)" vs "embedded fallback".
+- **Reload Catalog (cloud) GUI button.** One-click run of Updater.bat oneshot + in-process reload (`package.loaded['data.caches'] = nil` then re-require). Debounced to 2s. Intentionally not gated by the master Enable toggle so users can fetch the catalog before flipping the plugin on.
+- **`Updater.bat loop` background mode** for users who want a 15-minute auto-sync without touching the GUI.
+- **Server-side: looter-d4share container** now exposes `GET /d4/silentraven/{filename}` and the daily pipeline calls `generate_silentraven_caches()` after `generate_alfred_unique_items()`. Output: 75 cache entries (Helms / Chest / Legs / Gloves / Boots / Rings / Amulets / 1H+2H Weapons / Gold / Chaos + 31 'other' boss/event/material caches), 33 (44%) flagged legendary. Live at `https://looter.d4data.live/d4/silentraven/caches.lua`.
+
+### Fixed
+- **Scoring rule update from user instruction.** Legendary entries now keep their bonus weight even when the slot priority is set to 0 — previously a `slot_priority=0` short-circuit returned score=0 immediately, so a legendary card in a "skipped" slot would have been ignored. Now: `score = slot_priority + (legendary ? bonus : 0)`. And `pick_best_index` no longer returns `nil` when nothing scores above 0; it falls back to the first valid entry per the user's "if all options are 0 and not legendary we just pick one" rule. The chosen entry is flagged `fallback=true` in the breakdown so debug logs make the fallback obvious.
+
 ### Added (live-validated against second S09 dump)
 - **Catalog now ships 21 BountyMetaCache + Whisper Cache SNOs** with explicit `legendary` flags. Live dump from the user (panel open, count=4) showed:
   - `[1] sno=2102725 BountyMeta_Cache_Gold_Upgraded` → was legendary; now classified as `slot=gold legendary=true (catalog:legendary=true)`

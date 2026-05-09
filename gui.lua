@@ -4,6 +4,10 @@ local plugin_label   = 'silent_raven'
 local plugin_version = '0.1'
 local plugin_author  = 'magoogle'
 
+-- Lazy-required so a malformed core/rewards.lua doesn't kill the GUI
+-- module load -- the catalog status line is best-effort.
+local rewards_ok, rewards = pcall(require, 'core.rewards')
+
 local gui = {}
 
 local function cb(default, key)
@@ -24,6 +28,7 @@ gui.elements = {
     manual_fire_keybind        = keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_fire')),
     dump_rewards_keybind       = keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_rewards')),
     dump_rewards_button        = button:new(get_hash(plugin_label .. '_dump_rewards_button')),
+    reload_catalog_button      = button:new(get_hash(plugin_label .. '_reload_catalog_button')),
 
     reward_tree                = tree_node:new(1),
     -- quest_reward.enumerate() on this host returns 1-INDEXED keys
@@ -74,6 +79,19 @@ function gui.render()
         return
     end
 
+    -- Catalog freshness header.  Best-effort: if rewards failed to load
+    -- (compile error, missing module) we just skip.
+    if rewards_ok and rewards then
+        local src = rewards.CATALOG_SOURCE or 'unknown'
+        local age = rewards.last_sync_str and rewards.last_sync_str() or 'unknown'
+        if src == 'cloud' then
+            render_menu_header(string.format('Catalog: cloud (synced %s)', age))
+        else
+            render_menu_header(string.format(
+                'Catalog: embedded fallback (run Reload Catalog below to fetch from cloud)'))
+        end
+    end
+
     gui.elements.main_toggle:render('Enable',
         'Master enable for SilentRaven.  Auto-fires whisper turn-ins when in town and exposes SilentRavenPlugin to other scripts.')
 
@@ -90,6 +108,9 @@ function gui.render()
         'Bind a key, then press it with the reward panel open to print every quest_reward entry to console. Works even when the plugin is disabled.')
     gui.elements.dump_rewards_button:render('Dump reward options',
         'One-click alternative to the keybind. Click this with the reward panel open to print every quest_reward entry (index, sno, internal_name, valid, currently-selected) to console. D4 ships 3-5 choices depending on season -- use the dump output to set Reward card index correctly.', 0)
+
+    gui.elements.reload_catalog_button:render('Reload Catalog (cloud)',
+        'Run Updater.bat to fetch the latest cache catalog from looter.d4data.live, then reload it into memory. Use after a season patch to pick up new SNOs without editing code. Brief (~50-200ms) freeze while cmd.exe spawns; safe as a one-shot user action.', 0)
 
     if gui.elements.reward_tree:push('Reward selection') then
         gui.elements.auto_pick_toggle:render('Auto-pick by priority',

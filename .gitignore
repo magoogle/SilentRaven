@@ -16,3 +16,10 @@ desktop.ini
 notes/
 scratch/
 TODO.local.md
+
+# Updater.bat machine-local artifacts.  We DO ship data/caches.lua so a
+# fresh clone has a working catalog day-one (mirrors LooteerV3's pattern
+# of shipping data/items.lua); we DO NOT ship the per-run timestamp or
+# log because they're per-machine and churn on every sync.
+data/last_sync.lua
+data/last_sync_log.txt

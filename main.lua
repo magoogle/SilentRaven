@@ -29,6 +29,7 @@ local whispers = require 'core.whispers'
 local fsm      = require 'core.fsm'
 local external = require 'core.external'
 local log      = require 'core.log'
+local rewards  = require 'core.rewards'
 
 -- Auto-fire detection rate.  Quest scan + actor scan are O(n) over the
 -- live stream; cheap but not free, and we don't need higher resolution
@@ -39,6 +40,12 @@ local READY_CHECK_INTERVAL_S = 0.5
 local MANUAL_DEBOUNCE_S      = 1.0
 local last_manual_t          = -math.huge
 local last_dump_t            = -math.huge
+local last_reload_t          = -math.huge
+
+-- Reload Catalog button has its own debounce -- spawning cmd.exe back to
+-- back can pile up child processes if a user holds-down or double-clicks.
+-- 2s is plenty: a one-shot fetch + reload is well under that on success.
+local RELOAD_DEBOUNCE_S      = 2.0
 
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
@@ -114,14 +121,32 @@ local function handle_dump_input(now)
     log.info('--- end dump ---')
 end
 
+-- Reload Catalog button.  Debounced + intentionally NOT gated by
+-- settings.enabled -- the catalog is needed for proper classification
+-- before you'd even consider enabling the plugin.
+local function handle_reload_catalog(now)
+    if not gui.elements.reload_catalog_button:get() then return end
+    if (now - last_reload_t) < RELOAD_DEBOUNCE_S then return end
+    last_reload_t = now
+    log.info('Reload Catalog: spawning Updater.bat oneshot...')
+    local ok, source_or_err = rewards.fetch_and_reload()
+    if ok then
+        log.info('Reload Catalog: ok (source=' .. tostring(source_or_err) .. ')')
+    else
+        log.info('Reload Catalog: FAILED (' .. tostring(source_or_err) .. ')')
+    end
+end
+
 local function main_pulse()
     settings.update(gui)
     local now = (get_time_since_inject and get_time_since_inject()) or 0
 
-    -- Debug input first: dump-rewards is intentionally NOT gated by
-    -- settings.enabled so the user can use it for calibration before
-    -- ever enabling the plugin.
+    -- Debug + setup input first: dump-rewards and reload-catalog are
+    -- intentionally NOT gated by settings.enabled so the user can use
+    -- them for calibration / first-time-setup before ever enabling the
+    -- plugin.
     handle_dump_input(now)
+    handle_reload_catalog(now)
 
     if not settings.enabled then
         -- Disabled: drop any in-flight run cleanly so we don't leave

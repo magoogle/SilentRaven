@@ -4,6 +4,11 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 
 ## [Unreleased]
 
+### Added (D4Remote dashboard integration)
+- New `core/stats.lua` module: in-memory cumulative counters (`turnins_success`, `turnins_failed`, `tp_attempts`, `legendary_claimed`, `regular_claimed`, per-slot `<slot>_claimed`, last-pick details). Persists for the lifetime of the script -- resets only on reload, mirroring Alfred / GoFish.
+- `core/fsm.lua` snapshots the picked `quest_reward` entry into `tracker.last_pick_entry` BEFORE calling `pick_and_accept`, so `finalize()` can bump per-slot + legendary counters and call `D4Remote.record_loot(category, rarity)` once the claim verifies. Slot ids are translated to D4Remote's singular vocabulary (`rings → ring`, `amulets → amulet`, `weapons_1h/2h → weapon`, etc.) via a new `SLOT_TO_D4REMOTE_CATEGORY` map in `core/rewards.lua`.
+- `main.lua` `report_to_d4remote()` builds a flat key/value payload (~30 keys covering live state, catalog freshness, cumulative counters, per-slot breakdown, last-pick details) and pushes it via `D4Remote.update_stats('SilentRaven', payload)` from `main_pulse`, throttled to 1 Hz. Reporting runs even when the plugin is disabled so the dashboard card stays visible with `status="Disabled"`.
+
 ### Changed (simplification pass)
 - **Reward picking is now priority-only.** The fixed-index `Reward card index` slider is gone — the priority ranker in `core/rewards.lua` handles "which index to claim" with a built-in first-valid fallback for the all-zero edge case, so the fixed-index path was always dead-code-on-success. Auto-pick is implicit (no toggle); the GUI tree got smaller as a result.
 - **All slot priorities default to 5.** `gold` was 7 and `other` was 1; both are now 5 too. Pure neutral baseline. Legendary cards still beat non-legendary at the same priority via `legendary_bonus_weight` (default 50).

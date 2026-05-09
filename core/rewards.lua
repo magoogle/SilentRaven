@@ -276,6 +276,25 @@ M.SLOT_DISPLAY = {
     other       = 'Other / Unknown',
 }
 
+-- D4Remote.record_loot expects a singular category string per its
+-- INTEGRATION.md: "helm", "chest", "ring", "sigil", "material", etc.
+-- Map our slot ids onto that vocabulary.  Unknowns fall through to
+-- "cache" so D4Remote still groups SilentRaven picks meaningfully.
+M.SLOT_TO_D4REMOTE_CATEGORY = {
+    helms       = 'helm',
+    chest       = 'chest',
+    legs        = 'legs',
+    gloves      = 'gloves',
+    boots       = 'boots',
+    rings       = 'ring',
+    amulets     = 'amulet',
+    weapons_1h  = 'weapon',
+    weapons_2h  = 'weapon',
+    gold        = 'gold',
+    chaos       = 'cache',
+    other       = 'cache',
+}
+
 -- ---------------------------------------------------------------------------
 -- Slot extraction
 -- ---------------------------------------------------------------------------

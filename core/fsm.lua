@@ -23,6 +23,7 @@ local log      = require 'core.log'
 local whispers = require 'core.whispers'
 local tracker  = require 'core.tracker'
 local rewards  = require 'core.rewards'
+local stats    = require 'core.stats'
 
 local M = {}
 
@@ -130,6 +131,9 @@ end
 -- Fire the reward selection via quest_reward.pick_and_accept.  No
 -- fallback -- if the API isn't available or the call fails, the
 -- attempt fails and the FSM goes through fail_or_retry.
+--
+-- Also caches the picked entry on tracker so finalize() can bump the
+-- per-slot / legendary counters in core.stats once the claim verifies.
 local function fire_claim(settings, now)
     if not whispers.has_quest_reward_api() then
         fail_or_retry(now, 'quest_reward API not exposed by this host', settings)
@@ -140,6 +144,22 @@ local function fire_claim(settings, now)
         fail_or_retry(now, 'pick_index: ' .. tostring(reason), settings)
         return
     end
+
+    -- Snapshot the entry NOW (before pick_and_accept) so we have the
+    -- slot/legendary/name available for stats even if the post-claim
+    -- enumerate() returns differently after the host advances state.
+    local entries_ok, entries = pcall(quest_reward.enumerate)
+    if entries_ok and type(entries) == 'table' and entries[idx] then
+        local e = entries[idx]
+        tracker.last_pick_entry = {
+            slot      = rewards.extract_slot(e),
+            legendary = rewards.is_legendary(e),
+            name      = rewards.display_name(e),
+        }
+    else
+        tracker.last_pick_entry = nil
+    end
+
     local ok, ret = pcall(quest_reward.pick_and_accept, idx)
     if ok and ret then
         log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok [%s]', idx, reason))
@@ -147,6 +167,9 @@ local function fire_claim(settings, now)
         tracker.state_t = now
         return
     end
+    -- Pick failed at the API level -- discard the snapshot so finalize
+    -- doesn't credit it as claimed.
+    tracker.last_pick_entry = nil
     fail_or_retry(now, string.format('pick_and_accept(%d) returned %s', idx, tostring(ret)), settings)
 end
 
@@ -168,6 +191,24 @@ local function finalize(settings, cur_zone, success)
     tracker.last_result       = result
     tracker.last_result_t     = (get_time_since_inject and get_time_since_inject()) or 0
     tracker.all_task_done     = true
+
+    -- Stats + D4Remote loot record on success -- before reset_run
+    -- nukes tracker.last_pick_entry.
+    if success and tracker.last_pick_entry then
+        local ent = tracker.last_pick_entry
+        stats.bump_success(ent.slot, ent.legendary, ent.name, tracker.last_reason)
+        if D4Remote and D4Remote.record_loot then
+            local cat = (rewards.SLOT_TO_D4REMOTE_CATEGORY and rewards.SLOT_TO_D4REMOTE_CATEGORY[ent.slot])
+                     or 'cache'
+            local rarity = ent.legendary and 5 or 4   -- 5=Legendary, 4=Rare
+            pcall(D4Remote.record_loot, cat, rarity)
+            log.debug(settings, string.format(
+                'D4Remote.record_loot(%s, %d) for %s', cat, rarity, ent.name or '?'))
+        end
+    elseif not success then
+        stats.bump_failure(tracker.last_reason)
+    end
+
     tracker.reset_run()
     if cb then
         pcall(cb, result)
@@ -233,6 +274,7 @@ M.tick = function (settings)
             then
                 pcall(teleport_to_waypoint, settings.teleport_target_sno or 0x1CE51E)
                 tracker.tp_last_cast_t = now
+                stats.bump_tp()
                 log.debug(settings, 'teleport_to_waypoint cast')
             end
             return

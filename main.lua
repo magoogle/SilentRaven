@@ -31,6 +31,7 @@ local fsm      = require 'core.fsm'
 local external = require 'core.external'
 local log      = require 'core.log'
 local rewards  = require 'core.rewards'
+local stats    = require 'core.stats'
 
 -- Auto-fire detection rate.  Quest scan + actor scan are O(n) over the
 -- live stream; cheap but not free, and we don't need higher resolution
@@ -52,6 +53,12 @@ local RELOAD_DEBOUNCE_S      = 2.0
 -- on a false->true transition (one fire per click), then auto-clear
 -- the box.  Mirrors LooteerV3's reload_catalog_toggle pattern.
 local _last_reload_state     = false
+
+-- D4Remote.update_stats throttle.  D4Remote internally writes its
+-- state file every 3 seconds, so anything faster than ~1 Hz here is
+-- wasted work.  Keep it cheap on the game thread.
+local D4REMOTE_REPORT_INTERVAL_S = 1.0
+local last_d4remote_report_t     = 0
 
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
@@ -127,6 +134,98 @@ end
 --     log.info('--- end dump ---')
 -- end
 
+-- Build a flat key/value status payload for D4Remote.  Values must
+-- all be bool/number/string per D4Remote's INTEGRATION.md (no nested
+-- tables -- that's why core/stats.lua flattens per-slot counters).
+local function build_d4remote_payload()
+    local cur_zone = whispers.current_zone() or ''
+    local catalog_size = 0
+    if rewards.CACHE_CATALOG then
+        for _ in pairs(rewards.CACHE_CATALOG) do
+            catalog_size = catalog_size + 1
+        end
+    end
+
+    local status
+    if not settings.enabled then
+        status = 'Disabled'
+    elseif tracker.running then
+        status = 'Running: ' .. (tracker.state or 'STARTING')
+    elseif tracker.paused then
+        status = 'Paused'
+    elseif whispers.in_whisper_town() then
+        if tracker.ready then
+            if tracker.last_zone_handled == cur_zone then
+                status = 'Idle in town (latched)'
+            else
+                status = 'Ready -- bounty queued'
+            end
+        else
+            status = 'Idle in town'
+        end
+    else
+        status = 'Idle (zone=' .. cur_zone .. ')'
+    end
+
+    return {
+        -- Live state (the `enabled` key drives the dashboard ON/OFF badge)
+        enabled              = settings.enabled == true,
+        status               = status,
+        running              = tracker.running == true,
+        state                = tostring(tracker.state or 'IDLE'),
+        current_zone         = cur_zone,
+        auto_fire            = settings.auto_fire == true,
+        prefer_legendary     = settings.prefer_legendary == true,
+        legendary_bonus      = settings.legendary_bonus_weight or 0,
+        ready                = tracker.ready == true,
+        attempts             = tracker.attempts or 0,
+
+        -- Catalog
+        catalog_source       = rewards.CATALOG_SOURCE or 'unknown',
+        catalog_age          = (rewards.last_sync_str and rewards.last_sync_str()) or 'unknown',
+        catalog_entries      = catalog_size,
+
+        -- Cumulative counters
+        turnins_total        = stats.turnins_success + stats.turnins_failed,
+        turnins_success      = stats.turnins_success,
+        turnins_failed       = stats.turnins_failed,
+        tp_attempts          = stats.tp_attempts,
+        legendary_claimed    = stats.legendary_claimed,
+        regular_claimed      = stats.regular_claimed,
+
+        -- Per-slot breakdown (flat keys; D4Remote forbids nested tables)
+        helms_claimed        = stats.helms_claimed,
+        chest_claimed        = stats.chest_claimed,
+        legs_claimed         = stats.legs_claimed,
+        gloves_claimed       = stats.gloves_claimed,
+        boots_claimed        = stats.boots_claimed,
+        rings_claimed        = stats.rings_claimed,
+        amulets_claimed      = stats.amulets_claimed,
+        weapons_1h_claimed   = stats.weapons_1h_claimed,
+        weapons_2h_claimed   = stats.weapons_2h_claimed,
+        gold_claimed         = stats.gold_claimed,
+        chaos_claimed        = stats.chaos_claimed,
+        other_claimed        = stats.other_claimed,
+
+        -- Last claim
+        last_pick_name       = stats.last_pick_name,
+        last_pick_slot       = stats.last_pick_slot,
+        last_pick_legendary  = stats.last_pick_legendary == true,
+        last_reason          = stats.last_reason,
+        last_result          = stats.last_result,
+    }
+end
+
+-- Push stats to the D4Remote dashboard.  Throttled to 1 Hz on the
+-- game thread; D4Remote itself buffers writes to ~3s on the disk
+-- side, so anything faster is wasted work.
+local function report_to_d4remote(now)
+    if not (D4Remote and D4Remote.update_stats) then return end
+    if (now - last_d4remote_report_t) < D4REMOTE_REPORT_INTERVAL_S then return end
+    last_d4remote_report_t = now
+    pcall(function () D4Remote.update_stats('SilentRaven', build_d4remote_payload()) end)
+end
+
 -- Reload Catalog checkbox.  Edge-triggered: fires once on a
 -- false->true transition, then auto-clears the box so it visually
 -- "disarms" itself.  Debounced + intentionally NOT gated by
@@ -165,6 +264,12 @@ local function main_pulse()
     -- re-enable alongside the GUI elements when needed.)
     -- handle_dump_input(now)
     handle_reload_catalog(now)
+
+    -- D4Remote dashboard: push stats every pulse (throttled to 1 Hz
+    -- inside report_to_d4remote).  Done BEFORE the enabled gate so the
+    -- card stays visible (with status="Disabled") even when the user
+    -- has the plugin off.
+    report_to_d4remote(now)
 
     if not settings.enabled then
         -- Disabled: drop any in-flight run cleanly so we don't leave

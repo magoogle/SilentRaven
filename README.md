@@ -167,6 +167,27 @@ Most likely the bounty NPC isn't where the plugin expects, or its skin name does
 **Failed runs keep firing the autofire loop.**
 Shouldn't happen — the plugin latches the zone on both success *and* failure for exactly this reason. If you see it, check that `tracker.last_zone_handled` is being set (debug log on success, `[SilentRaven] run finished: failed` on failure).
 
+## D4Remote dashboard
+
+SilentRaven exposes itself to the D4Remote web dashboard via the standard `register` + `update_stats` + `record_loot` integration points. The plugin card on the **Plugins** tab shows:
+
+| Field | Source |
+|---|---|
+| `enabled`, `status`, `running`, `state`, `current_zone` | live FSM + settings |
+| `auto_fire`, `prefer_legendary`, `legendary_bonus`, `ready`, `attempts` | live settings + tracker |
+| `catalog_source`, `catalog_age`, `catalog_entries` | core/rewards.lua |
+| `turnins_total`, `turnins_success`, `turnins_failed` | core/stats.lua cumulative counters |
+| `tp_attempts` | bumped on each TP-to-Temis cast |
+| `legendary_claimed`, `regular_claimed` | per-rarity claim count |
+| `helms_claimed`, `chest_claimed`, `legs_claimed`, `gloves_claimed`, `boots_claimed`, `rings_claimed`, `amulets_claimed`, `weapons_1h_claimed`, `weapons_2h_claimed`, `gold_claimed`, `chaos_claimed`, `other_claimed` | per-slot claim counts (flat keys -- D4Remote forbids nested tables) |
+| `last_pick_name`, `last_pick_slot`, `last_pick_legendary`, `last_reason`, `last_result` | most recent claim outcome |
+
+The `update_stats` push runs from `main_pulse` throttled to 1 Hz (D4Remote itself buffers writes to ~3 s, so anything faster is wasted work). Calls happen even when the plugin is disabled — so the card stays visible with `status="Disabled"`.
+
+`record_loot` fires once per successful claim. SilentRaven slots map to D4Remote's vocabulary as: `helms→helm`, `chest→chest`, `legs→legs`, `gloves→gloves`, `boots→boots`, `rings→ring`, `amulets→amulet`, `weapons_1h/2h→weapon`, `gold→gold`, `chaos→cache`, `other→cache`. Rarity is `5 (Legendary)` if the picked entry's `legendary` flag is true, else `4 (Rare)`.
+
+Counters are in-memory and reset on script reload — same pattern as Alfred / GoFish.
+
 ## Roadmap
 
 This is v0.1 — first release, untested live. Likely follow-ups after testing:

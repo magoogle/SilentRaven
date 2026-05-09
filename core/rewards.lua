@@ -187,33 +187,35 @@ end
 -- button click -- never per-frame.  Each cmd.exe spawn is ~50-100ms of
 -- hard freeze on Windows; rapid clicks should be debounced upstream.
 --
--- Always logs the resolved paths to console so a failed reload is
--- diagnosable from the console buffer alone (no need to attach a
--- debugger).  The error string returned is human-readable AND
--- machine-checkable -- main.lua dumps it verbatim on failure.
+-- The error strings returned are human-readable AND machine-checkable
+-- (main.lua's handle_reload_catalog dumps them verbatim on failure).
+-- The diagnostic console.print calls used while debugging path
+-- resolution are commented out below -- uncomment them if a future
+-- failure mode needs the same kind of trace.
 M.fetch_and_reload = function ()
     local plug = _plugin_dir()
     if not plug then
         local msg = 'could not resolve plugin dir (debug.getinfo + package.searchpath both failed)'
-        if console and console.print then
-            console.print('[SilentRaven] fetch_and_reload: ' .. msg)
-        end
+        -- if console and console.print then
+        --     console.print('[SilentRaven] fetch_and_reload: ' .. msg)
+        -- end
         return false, msg
     end
 
     local log_path = plug .. 'data/last_sync_log.txt'
     local bat_path = plug .. 'Updater.bat'
 
-    if console and console.print then
-        console.print('[SilentRaven] fetch_and_reload: plug=' .. plug)
-        console.print('[SilentRaven] fetch_and_reload: bat =' .. bat_path)
-    end
+    -- Path-resolution trace -- uncomment when debugging plugin-dir issues.
+    -- if console and console.print then
+    --     console.print('[SilentRaven] fetch_and_reload: plug=' .. plug)
+    --     console.print('[SilentRaven] fetch_and_reload: bat =' .. bat_path)
+    -- end
 
     if not _file_exists(bat_path) then
         local msg = 'Updater.bat not found at ' .. bat_path
-        if console and console.print then
-            console.print('[SilentRaven] fetch_and_reload: ' .. msg)
-        end
+        -- if console and console.print then
+        --     console.print('[SilentRaven] fetch_and_reload: ' .. msg)
+        -- end
         return false, msg
     end
 
@@ -235,9 +237,9 @@ M.fetch_and_reload = function ()
     if log_size == 0 then
         local msg = 'Updater.bat did not appear to run (no last_sync_log.txt at '
                  .. log_path .. ')'
-        if console and console.print then
-            console.print('[SilentRaven] fetch_and_reload: ' .. msg)
-        end
+        -- if console and console.print then
+        --     console.print('[SilentRaven] fetch_and_reload: ' .. msg)
+        -- end
         return false, msg
     end
 

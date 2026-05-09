@@ -119,16 +119,35 @@ end
 -- the plugin folder as their cwd on this host -- we have to pass an
 -- absolute path to Updater.bat or it won't find data/.
 --
--- Trick: package.searchpath('core.rewards') returns this file's own
--- absolute path; chop off "core/rewards.lua" to get the plugin root.
--- (Same pattern LooteerV3/core/item_filter.lua uses.)
+-- Two strategies, tried in order:
+--   1. debug.getinfo(1, "S").source -- always returns this file's own
+--      path with a leading '@', regardless of package.path config.
+--      Most reliable on QQT-style hosts where package.path may not
+--      include every loaded plugin's root.
+--   2. package.searchpath('core.rewards', package.path) -- fallback
+--      for hosts that don't expose debug.getinfo properly.
+--
+-- Either way, chop off "core/rewards.lua" to get the plugin root.
 local function _plugin_dir()
-    local p = package.searchpath and package.searchpath('core.rewards', package.path)
-    if not p then return nil end
-    local cut = p:find('[\\/]core[\\/]rewards%.lua$')
-    if not cut then return nil end
-    -- Keep the trailing separator so callers can concatenate filenames.
-    return p:sub(1, cut + 1)
+    local candidates = {}
+    if debug and debug.getinfo then
+        local info = debug.getinfo(1, 'S')
+        if info and info.source and info.source:sub(1, 1) == '@' then
+            candidates[#candidates + 1] = info.source:sub(2)
+        end
+    end
+    if package.searchpath then
+        local p = package.searchpath('core.rewards', package.path)
+        if p then candidates[#candidates + 1] = p end
+    end
+    for _, p in ipairs(candidates) do
+        local cut = p:find('[\\/]core[\\/]rewards%.lua$')
+        if cut then
+            -- Keep the trailing separator so callers can concatenate filenames.
+            return p:sub(1, cut + 1)
+        end
+    end
+    return nil
 end
 
 -- Last-sync epoch from data/last_sync.lua (written by Updater.bat).
@@ -153,18 +172,47 @@ M.last_sync_str = function ()
     return string.format('%.0fd ago', age/86400)
 end
 
+-- File-existence probe (no shelling out).
+local function _file_exists(path)
+    local fh = io.open(path, 'rb')
+    if fh then fh:close(); return true end
+    return false
+end
+
 -- One-shot: run Updater.bat to fetch caches.lua, then reload it.
 -- Returns (ok, source_or_err).  Safe to call ONLY from a user-triggered
 -- button click -- never per-frame.  Each cmd.exe spawn is ~50-100ms of
 -- hard freeze on Windows; rapid clicks should be debounced upstream.
+--
+-- Always logs the resolved paths to console so a failed reload is
+-- diagnosable from the console buffer alone (no need to attach a
+-- debugger).  The error string returned is human-readable AND
+-- machine-checkable -- main.lua dumps it verbatim on failure.
 M.fetch_and_reload = function ()
     local plug = _plugin_dir()
     if not plug then
-        return false, 'could not resolve plugin dir (package.searchpath unavailable?)'
+        local msg = 'could not resolve plugin dir (debug.getinfo + package.searchpath both failed)'
+        if console and console.print then
+            console.print('[SilentRaven] fetch_and_reload: ' .. msg)
+        end
+        return false, msg
     end
-    local cache_path = plug .. 'data/caches.lua'
-    local log_path   = plug .. 'data/last_sync_log.txt'
-    local bat_path   = plug .. 'Updater.bat'
+
+    local log_path = plug .. 'data/last_sync_log.txt'
+    local bat_path = plug .. 'Updater.bat'
+
+    if console and console.print then
+        console.print('[SilentRaven] fetch_and_reload: plug=' .. plug)
+        console.print('[SilentRaven] fetch_and_reload: bat =' .. bat_path)
+    end
+
+    if not _file_exists(bat_path) then
+        local msg = 'Updater.bat not found at ' .. bat_path
+        if console and console.print then
+            console.print('[SilentRaven] fetch_and_reload: ' .. msg)
+        end
+        return false, msg
+    end
 
     -- Wipe prior log so its post-spawn existence proves the bat actually
     -- ran (vs being silently blocked by an os.execute sandbox).
@@ -182,7 +230,12 @@ M.fetch_and_reload = function ()
         end
     end
     if log_size == 0 then
-        return false, 'Updater.bat did not appear to run (no last_sync_log.txt)'
+        local msg = 'Updater.bat did not appear to run (no last_sync_log.txt at '
+                 .. log_path .. ')'
+        if console and console.print then
+            console.print('[SilentRaven] fetch_and_reload: ' .. msg)
+        end
+        return false, msg
     end
 
     -- Reload the catalog from disk now that Updater.bat has written it.

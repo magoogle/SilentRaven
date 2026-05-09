@@ -19,6 +19,7 @@
 local log      = require 'core.log'
 local whispers = require 'core.whispers'
 local tracker  = require 'core.tracker'
+local rewards  = require 'core.rewards'
 
 local M = {}
 
@@ -92,6 +93,36 @@ local function fail_or_retry(now, reason, settings)
     tracker.state_t = now
 end
 
+-- Resolve which reward index to claim.  When auto_pick_by_priority is
+-- ON, scores every live enumerate() entry and returns the winner.
+-- When OFF (or when scoring returns nothing > 0), falls back to the
+-- fixed reward_index slider.
+local function resolve_pick_index(settings)
+    local fixed = settings.reward_index or 1
+    if not settings.auto_pick_by_priority then return fixed, 'fixed' end
+    if not (quest_reward and type(quest_reward.enumerate) == 'function') then
+        return fixed, 'fixed (enumerate unavailable)'
+    end
+    local ok, entries = pcall(quest_reward.enumerate)
+    if not ok or type(entries) ~= 'table' then
+        return fixed, 'fixed (enumerate failed)'
+    end
+    local best, score, breakdown = rewards.pick_best_index(entries, settings)
+    if settings.debug then
+        for i = 1, #breakdown do
+            local b = breakdown[i]
+            log.debug(settings, string.format(
+                '  pick: [%s] %s slot=%s legendary=%s score=%d (%s)',
+                tostring(b.index), b.display_name, b.slot,
+                tostring(b.legendary), b.score, b.evidence))
+        end
+    end
+    if best then
+        return best, string.format('priority(score=%d)', score)
+    end
+    return fixed, 'fixed (priority returned no winner)'
+end
+
 -- Try to fire the reward selection.  Prefers quest_reward.pick_and_accept;
 -- falls back to fractional clicks if the API isn't on this host or the
 -- user has overridden via use_click_fallback=true (defensive).
@@ -99,10 +130,10 @@ end
 -- 'CLICK_CARD' (two-click fallback path; second click happens on next tick).
 local function fire_claim(settings, now)
     if whispers.has_quest_reward_api() and not settings.use_click_fallback then
-        local idx = settings.reward_index or 0
+        local idx, reason = resolve_pick_index(settings)
         local ok, ret = pcall(quest_reward.pick_and_accept, idx)
         if ok and ret then
-            log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok', idx))
+            log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok [%s]', idx, reason))
             tracker.state   = 'API_CLAIMING'
             tracker.state_t = now
             return

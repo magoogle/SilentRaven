@@ -5,7 +5,10 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 ## [Unreleased]
 
 ### Added
-- "Dump reward options" GUI keybind AND button. Press/click while the reward panel is open to print every `quest_reward.enumerate()` entry (index, sno, internal_name, valid, currently-selected) to console. Works even when the plugin is disabled (debug aid). The button is the more reliable surface — no key binding required.
+- **Priority-based reward picking.** New `core/rewards.lua` module: SNO-catalog slot mapping (lifted from LooteerV3 v20260509 — 9 known BountyMetaCache SNOs covering Helms / Chest / Legs / Gloves / Boots / Rings / Amulets / 1H Weapons / 2H Weapons), `internal_name` pattern fallback for unknown caches, multi-field legendary detection (probes `legendary`/`is_legendary`/`is_unique`/`guaranteed_legendary`/`is_ancestral`/`rarity`/`quality`/`tier`/`class`/`rank`/`r` then falls back to name-pattern matching).
+- "Auto-pick by priority" GUI toggle plus per-slot priority sliders (0..10 each) and a "Prefer legendary" toggle with adjustable bonus weight (0..100). When auto-pick is on, the FSM scores every live `enumerate()` entry and claims the winner; ties resolve to the lowest index. Falls back to the fixed `Reward card index` when scoring returns no winner (e.g. all slots set to 0).
+- "Dump reward options" GUI keybind AND button. Press/click while the reward panel is open to print every `quest_reward.enumerate()` entry to console. Works even when the plugin is disabled (debug aid). The button is the more reliable surface — no key binding required.
+- **Enhanced dump output.** Every entry now prints (a) the documented `sno / internal_name / valid` triple, (b) the parsed `slot`, (c) the legendary verdict + the evidence token explaining the decision (`field:rarity=legendary`, `name:ancestral`, etc.), and (d) every extra field on the entry — so any rarity / quality / tier field the host exposes that the API stub doesn't document will surface and we can wire it into `is_legendary`.
 - `core/whispers.lua` exposes `M.dump_rewards()` for the same purpose; safe to call any time, gracefully degrades when the host doesn't expose `quest_reward`.
 
 ### Changed

@@ -101,7 +101,11 @@ Console output is the primary observability channel. Turn on `Debug logging` to 
 | **Auto-fire in town** | When enabled, claims turn-ins automatically while in `Skov_Temis` / `Hawe_TreeOfWhispers`. Disable to make the plugin strictly call-driven. |
 | **Debug logging** | Print FSM transitions to console. |
 | **Manual trigger keybind** | Press to fire a turn-in run now (TP-to-Temis included). |
-| **Reward card index** | 1-based, matches the `[N]` keys from "Dump reward options". Live S09 returns 4 cards (Helms / Legs / Rings / Rings); count and order vary by season — dump first, then pick. |
+| **Reward card index** | 1-based fixed pick. Used when **Auto-pick by priority** is OFF. Matches the `[N]` keys from "Dump reward options". Live S09 returns 4 cards (Helms / Legs / Rings / Rings). |
+| **Auto-pick by priority** | When ON, scores every live `enumerate()` entry by per-slot priority + legendary bonus and claims the winner. When OFF, uses the fixed Reward card index. |
+| **Prefer legendary** | Adds the legendary bonus weight to cards detected as legendary. Detection probes extra fields on the live entry first, then falls back to internal_name pattern matching. |
+| **Legendary bonus weight (0-100)** | Score boost added to legendary cards. High (e.g. 100) makes any legendary outrank any non-legendary. Low (e.g. 5) only breaks ties. |
+| **Slot priorities (Helms / Chest / Legs / ...)** | 0–10 weight per slot. 0 = skip the slot entirely. Higher values win ties. |
 | **Use click fallback** | Force the two-click pixel path instead of the `quest_reward` API. Defensive — only enable if the API isn't claiming reliably on your host. |
 | **Show calibration overlay** | Render crosshairs at the configured reward + accept click points so you can dial them in without consuming a turn-in. |
 | **Reward / Accept X-Y (per-mille)** | Click points for the fallback path, expressed as 0.001 units of screen size (500 = mid-screen). Resolution-independent. |

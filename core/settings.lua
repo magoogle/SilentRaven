@@ -14,7 +14,33 @@ local M = {
 
     -- Reward card index (1-based -- matches quest_reward.enumerate() keys
     -- on this host; live-validated S09 with count=4, keys [1..4]).
+    -- Used as the picked index when auto_pick_by_priority is OFF, or as
+    -- the fallback when priority pick returns no winner.
     reward_index       = 1,
+
+    -- Priority-based picking.  When on, the FSM scores every live
+    -- enumerate() entry by per-slot priority + legendary bonus and
+    -- picks the winner.  When off, falls back to reward_index.
+    auto_pick_by_priority = false,
+    prefer_legendary       = true,
+    legendary_bonus_weight = 50,
+
+    -- Per-slot priority weights (0..10; 0 = skip this slot entirely).
+    -- Keys must match rewards.KNOWN_SLOTS.  Defaults are middle (5)
+    -- so the user has to opt in to specific slots; 'other' starts low
+    -- so unrecognized cache types don't accidentally win ties.
+    slot_priorities = {
+        helms      = 5,
+        chest      = 5,
+        legs       = 5,
+        gloves     = 5,
+        boots      = 5,
+        rings      = 5,
+        amulets    = 5,
+        weapons_1h = 5,
+        weapons_2h = 5,
+        other      = 1,
+    },
 
     -- Click-fallback path.  Used only if the host doesn't expose
     -- quest_reward.pick_and_accept (older runtime).  Defaults tuned for
@@ -43,6 +69,25 @@ M.update = function (gui)
     M.accept_x_frac      = (g.accept_x_slider:get() or 500) / 1000.0
     M.accept_y_frac      = (g.accept_y_slider:get() or 850) / 1000.0
     M.show_calibration   = g.show_calibration_toggle:get()
+
+    -- Priority pick settings.  Sliders are present unconditionally; the
+    -- auto_pick_by_priority toggle gates whether they're used at claim time.
+    M.auto_pick_by_priority  = g.auto_pick_toggle:get()
+    M.prefer_legendary       = g.prefer_legendary_toggle:get()
+    M.legendary_bonus_weight = g.legendary_bonus_slider:get() or 50
+
+    -- Per-slot priority sliders.  Slider names follow the pattern
+    -- priority_<slot>_slider; missing element defaults to 5 (neutral).
+    if g.priority_helms_slider      then M.slot_priorities.helms      = g.priority_helms_slider:get()      end
+    if g.priority_chest_slider      then M.slot_priorities.chest      = g.priority_chest_slider:get()      end
+    if g.priority_legs_slider       then M.slot_priorities.legs       = g.priority_legs_slider:get()       end
+    if g.priority_gloves_slider     then M.slot_priorities.gloves     = g.priority_gloves_slider:get()     end
+    if g.priority_boots_slider      then M.slot_priorities.boots      = g.priority_boots_slider:get()      end
+    if g.priority_rings_slider      then M.slot_priorities.rings      = g.priority_rings_slider:get()      end
+    if g.priority_amulets_slider    then M.slot_priorities.amulets    = g.priority_amulets_slider:get()    end
+    if g.priority_weapons_1h_slider then M.slot_priorities.weapons_1h = g.priority_weapons_1h_slider:get() end
+    if g.priority_weapons_2h_slider then M.slot_priorities.weapons_2h = g.priority_weapons_2h_slider:get() end
+    if g.priority_other_slider      then M.slot_priorities.other      = g.priority_other_slider:get()      end
 end
 
 return M

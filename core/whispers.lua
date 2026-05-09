@@ -243,6 +243,11 @@ M.dump_rewards = function ()
     end)
 
     console.print(PFX .. 'enumerate() count: ' .. #keys)
+
+    -- Lazy require so this still works if rewards.lua fails to load
+    -- for any reason -- the basic field dump must always be available.
+    local rewards_ok, rewards = pcall(require, 'core.rewards')
+
     for _, k in ipairs(keys) do
         local e = entries[k] or {}
         local sno_str = '?'
@@ -257,6 +262,33 @@ M.dump_rewards = function ()
             tostring(e.internal_name or '?'),
             tostring(e.valid),
             marker))
+
+        -- Slot + legendary verdict from the rewards classifier.  Gives
+        -- the user immediate feedback on whether catalog/heuristic
+        -- parsing is finding the right thing.
+        if rewards_ok and rewards then
+            local slot      = rewards.extract_slot(e)
+            local legendary, evidence = rewards.is_legendary(e)
+            local display   = rewards.display_name(e)
+            console.print(string.format('%s        -> display="%s" slot=%s legendary=%s (%s)',
+                PFX, display, slot, tostring(legendary), evidence))
+        end
+
+        -- Every field outside {sno, internal_name, valid}.  This is
+        -- where we'll see any rarity / legendary / quality field the
+        -- host exposes that the API stub didn't document.  If a field
+        -- shows up here that we should be using for legendary
+        -- detection, add it to rewards.is_legendary.
+        local extras = {}
+        for fk, fv in pairs(e) do
+            if fk ~= 'sno' and fk ~= 'internal_name' and fk ~= 'valid' then
+                extras[#extras + 1] = tostring(fk) .. '=' .. tostring(fv)
+            end
+        end
+        if #extras > 0 then
+            table.sort(extras)
+            console.print(PFX .. '        extras: ' .. table.concat(extras, ', '))
+        end
     end
 end
 

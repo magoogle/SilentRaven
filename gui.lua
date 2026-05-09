@@ -33,6 +33,25 @@ gui.elements = {
     -- covers the observed 3-5 card spread.
     reward_index_slider        = si(1, 5, 1, 'reward_index'),
 
+    -- ---- Priority pick (auto-select by slot + legendary preference) ----
+    auto_pick_toggle           = cb(false, 'auto_pick'),
+    priority_tree              = tree_node:new(1),
+    prefer_legendary_toggle    = cb(true,  'prefer_legendary'),
+    legendary_bonus_slider     = si(0, 100, 50, 'legendary_bonus'),
+
+    -- Per-slot priority sliders (0 = skip, 10 = max).  Slot ids match
+    -- core/rewards.lua KNOWN_SLOTS.
+    priority_helms_slider      = si(0, 10, 5, 'pri_helms'),
+    priority_chest_slider      = si(0, 10, 5, 'pri_chest'),
+    priority_legs_slider       = si(0, 10, 5, 'pri_legs'),
+    priority_gloves_slider     = si(0, 10, 5, 'pri_gloves'),
+    priority_boots_slider      = si(0, 10, 5, 'pri_boots'),
+    priority_rings_slider      = si(0, 10, 5, 'pri_rings'),
+    priority_amulets_slider    = si(0, 10, 5, 'pri_amulets'),
+    priority_weapons_1h_slider = si(0, 10, 5, 'pri_weapons_1h'),
+    priority_weapons_2h_slider = si(0, 10, 5, 'pri_weapons_2h'),
+    priority_other_slider      = si(0, 10, 1, 'pri_other'),
+
     fallback_tree              = tree_node:new(1),
     use_click_fallback_toggle  = cb(false, 'use_click_fallback'),
     -- Fracs stored as int-permille (0..1000) since slider_int is what's
@@ -71,9 +90,31 @@ function gui.render()
         'One-click alternative to the keybind. Click this with the reward panel open to print every quest_reward entry (index, sno, internal_name, valid, currently-selected) to console. D4 ships 3-5 choices depending on season -- use the dump output to set Reward card index correctly.', 0)
 
     if gui.elements.reward_tree:push('Reward selection') then
-        gui.elements.reward_index_slider:render('Reward card index',
-            'Which reward card to claim. Indices are 1-based and match the [N] keys printed by Dump reward options. Live S09 shows 4 cards (Helms / Legs / Rings / Rings); count and order vary by season.')
+        gui.elements.auto_pick_toggle:render('Auto-pick by priority',
+            'When ON, SilentRaven scores every live enumerate() entry by per-slot priority + legendary bonus and claims the winner. When OFF, claims the fixed Reward card index below.')
+        gui.elements.reward_index_slider:render('Reward card index (fixed-pick mode)',
+            '1-based index used when Auto-pick is OFF. Matches the [N] keys printed by Dump reward options. Ignored when Auto-pick is ON.')
         gui.elements.reward_tree:pop()
+    end
+
+    if gui.elements.priority_tree:push('Priority pick (auto-pick mode)') then
+        render_menu_header('Per-slot priority weights. 0 = skip this slot entirely; higher values win ties. Use Dump reward options to see what your live cards parse as, then weight accordingly.')
+        gui.elements.prefer_legendary_toggle:render('Prefer legendary',
+            'When ON, legendary-detected cards get the bonus weight added. Detection probes extra fields on the live entry (rarity / quality / etc.) then falls back to internal_name pattern matching ("legendary", "ancestral", "guaranteed").')
+        gui.elements.legendary_bonus_slider:render('Legendary bonus weight (0-100)',
+            'Score boost added to legendary cards when Prefer legendary is ON. Set high (e.g. 100) to make any legendary outrank any non-legendary regardless of slot. Set low (e.g. 5) to only break ties.')
+        render_menu_header('Slot priorities (0..10):')
+        gui.elements.priority_helms_slider     :render('Helms',             'Priority weight for Collection of Helms (sno 1087411).')
+        gui.elements.priority_chest_slider     :render('Chest',             'Priority weight for Collection of Chestplates (sno 1087549).')
+        gui.elements.priority_legs_slider      :render('Legs',              'Priority weight for Collection of Leg Guards (sno 1087551).')
+        gui.elements.priority_gloves_slider    :render('Gloves',            'Priority weight for Collection of Gauntlets (sno 1087555).')
+        gui.elements.priority_boots_slider     :render('Boots',             'Priority weight for Collection of Boots (sno 1087553).')
+        gui.elements.priority_rings_slider     :render('Rings',             'Priority weight for Collection of Rings (sno 1087570).')
+        gui.elements.priority_amulets_slider   :render('Amulets',           'Priority weight for Collection of Amulets (sno 1087572).')
+        gui.elements.priority_weapons_1h_slider:render('One-Hand Weapons',  'Priority weight for Collection of One-handed Weapons (sno 1087567).')
+        gui.elements.priority_weapons_2h_slider:render('Two-Hand Weapons',  'Priority weight for Collection of Two-Handed Weapons (sno 1087557).')
+        gui.elements.priority_other_slider     :render('Other / Unknown',   'Priority weight for any cache that doesn\'t match a known slot (defensive against future-season caches).')
+        gui.elements.priority_tree:pop()
     end
 
     if gui.elements.fallback_tree:push('Click-fallback (advanced)') then

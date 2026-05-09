@@ -98,18 +98,31 @@ local function handle_manual_keybind(now)
     fsm.start(settings, 'manual', true, nil)
 end
 
-local function handle_dump_keybind(now)
-    if gui.elements.dump_rewards_keybind:get_state() ~= 1 then return end
+-- Fires on either the keybind or the GUI button.  Intentionally NOT
+-- gated by settings.enabled -- this is a debug aid; the user should be
+-- able to dump reward options before they ever enable the plugin to
+-- pick the right Reward card index.
+local function handle_dump_input(now)
+    local keybind_pressed = gui.elements.dump_rewards_keybind:get_state() == 1
+    local button_pressed  = gui.elements.dump_rewards_button:get() == true
+    if not (keybind_pressed or button_pressed) then return end
     if (now - last_dump_t) < MANUAL_DEBOUNCE_S then return end
     last_dump_t = now
-    gui.elements.dump_rewards_keybind:set(false)
-    log.info('--- reward dump ---')
+    if keybind_pressed then gui.elements.dump_rewards_keybind:set(false) end
+    log.info('--- reward dump (' .. (keybind_pressed and 'keybind' or 'button') .. ') ---')
     whispers.dump_rewards()
     log.info('--- end dump ---')
 end
 
 local function main_pulse()
     settings.update(gui)
+    local now = (get_time_since_inject and get_time_since_inject()) or 0
+
+    -- Debug input first: dump-rewards is intentionally NOT gated by
+    -- settings.enabled so the user can use it for calibration before
+    -- ever enabling the plugin.
+    handle_dump_input(now)
+
     if not settings.enabled then
         -- Disabled: drop any in-flight run cleanly so we don't leave
         -- callbacks orphaned across an enable/disable toggle.
@@ -122,9 +135,7 @@ local function main_pulse()
         return
     end
 
-    local now = (get_time_since_inject and get_time_since_inject()) or 0
     handle_manual_keybind(now)
-    handle_dump_keybind(now)
 
     -- If a run is in flight, just tick the FSM.  Don't refresh "ready"
     -- (already running -- no point) and don't start anything new.

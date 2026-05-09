@@ -23,6 +23,7 @@ gui.elements = {
 
     manual_fire_keybind        = keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_fire')),
     dump_rewards_keybind       = keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_rewards')),
+    dump_rewards_button        = button:new(get_hash(plugin_label .. '_dump_rewards_button')),
 
     reward_tree                = tree_node:new(1),
     -- D4 can ship 3-5 reward choices depending on season / quest type.
@@ -62,8 +63,10 @@ function gui.render()
     gui.elements.manual_fire_keybind:render('Manual trigger keybind',
         'Press to fire a turn-in run now (TP-to-Temis included).  Equivalent to calling SilentRavenPlugin.trigger_tasks_with_teleport(...).')
 
-    gui.elements.dump_rewards_keybind:render('Dump reward options',
-        'Print every quest_reward entry to console (index, sno, internal_name, valid, currently-selected). D4 ships 3-5 choices depending on season -- press this with the panel open to see what your character actually has, then set Reward card index accordingly.')
+    gui.elements.dump_rewards_keybind:render('Dump reward options (keybind)',
+        'Bind a key, then press it with the reward panel open to print every quest_reward entry to console. Works even when the plugin is disabled.')
+    gui.elements.dump_rewards_button:render('Dump reward options',
+        'One-click alternative to the keybind. Click this with the reward panel open to print every quest_reward entry (index, sno, internal_name, valid, currently-selected) to console. D4 ships 3-5 choices depending on season -- use the dump output to set Reward card index correctly.', 0)
 
     if gui.elements.reward_tree:push('Reward selection') then
         gui.elements.reward_index_slider:render('Reward card index',

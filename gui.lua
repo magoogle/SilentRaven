@@ -26,9 +26,19 @@ gui.elements = {
     debug_toggle               = cb(false, 'debug'),
 
     manual_fire_keybind        = keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_fire')),
-    dump_rewards_keybind       = keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_rewards')),
-    dump_rewards_button        = button:new(get_hash(plugin_label .. '_dump_rewards_button')),
-    reload_catalog_button      = button:new(get_hash(plugin_label .. '_reload_catalog_button')),
+
+    -- Dump reward options -- commented out for normal play, re-enable
+    -- when investigating new-season SNOs.  Three places to uncomment:
+    --   1) these two element constructors
+    --   2) the matching :render() calls in gui.render() below
+    --   3) handle_dump_input + its call site in main.lua
+    -- dump_rewards_keybind       = keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_rewards')),
+    -- dump_rewards_button        = button:new(get_hash(plugin_label .. '_dump_rewards_button')),
+
+    -- Self-resetting checkbox: user clicks it on, handler fires the
+    -- one-shot reload, then sets it back to false so the visual
+    -- "disarms" itself.  Mirrors LooteerV3's reload_catalog_toggle.
+    reload_catalog_toggle      = cb(false, 'reload_catalog_toggle'),
 
     -- Priority pick (the only pick mode -- fixed-index slider and
     -- pixel-click fallback were removed).
@@ -88,13 +98,14 @@ function gui.render()
     gui.elements.manual_fire_keybind:render('Manual trigger keybind',
         'Press to fire a turn-in run now (TP-to-Temis included).  Equivalent to calling SilentRavenPlugin.trigger_tasks_with_teleport(...).')
 
-    gui.elements.dump_rewards_keybind:render('Dump reward options (keybind)',
-        'Bind a key, then press it with the reward panel open to print every quest_reward entry to console. Works even when the plugin is disabled.')
-    gui.elements.dump_rewards_button:render('Dump reward options',
-        'One-click alternative to the keybind. Click this with the reward panel open to print every quest_reward entry (index, sno, internal_name, valid, currently-selected) to console -- handy for verifying slot/legendary classification on new-season SNOs.', 0)
+    -- Dump reward options renderers -- commented out (see element decls above).
+    -- gui.elements.dump_rewards_keybind:render('Dump reward options (keybind)',
+    --     'Bind a key, then press it with the reward panel open to print every quest_reward entry to console. Works even when the plugin is disabled.')
+    -- gui.elements.dump_rewards_button:render('Dump reward options',
+    --     'One-click alternative to the keybind. Click this with the reward panel open to print every quest_reward entry (index, sno, internal_name, valid, currently-selected) to console -- handy for verifying slot/legendary classification on new-season SNOs.', 0)
 
-    gui.elements.reload_catalog_button:render('Reload Catalog (cloud)',
-        'Run Updater.bat to fetch the latest cache catalog from looter.d4data.live, then reload it into memory. Use after a season patch to pick up new SNOs without editing code. Brief (~50-200ms) freeze while cmd.exe spawns; safe as a one-shot user action.', 0)
+    gui.elements.reload_catalog_toggle:render('Reload Catalog (cloud)',
+        'Tick to run Updater.bat: fetches the latest cache catalog from looter.d4data.live and reloads it into memory. The tick auto-clears once the run completes. Use after a season patch to pick up new SNOs without editing code. Brief (~50-200ms) freeze while cmd.exe spawns; safe as a one-shot user action.')
 
     if gui.elements.priority_tree:push('Priority pick') then
         render_menu_header('Per-slot priority weights. All default 5 (neutral). Lower a slot to deprioritize it; raise to prefer it. Legendary cards still beat non-legendary at the same priority via the bonus weight below.')

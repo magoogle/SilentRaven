@@ -40,13 +40,18 @@ local READY_CHECK_INTERVAL_S = 0.5
 -- Manual-trigger keybind debounce (mirrors Alfred's 1s timeout).
 local MANUAL_DEBOUNCE_S      = 1.0
 local last_manual_t          = -math.huge
-local last_dump_t            = -math.huge
+-- local last_dump_t          = -math.huge   -- (re-enable with handle_dump_input)
 local last_reload_t          = -math.huge
 
--- Reload Catalog button has its own debounce -- spawning cmd.exe back to
--- back can pile up child processes if a user holds-down or double-clicks.
+-- Reload Catalog has its own debounce -- spawning cmd.exe back to back
+-- can pile up child processes if the checkbox is rapidly re-armed.
 -- 2s is plenty: a one-shot fetch + reload is well under that on success.
 local RELOAD_DEBOUNCE_S      = 2.0
+
+-- Edge-trigger memory for the Reload Catalog checkbox.  We only fire
+-- on a false->true transition (one fire per click), then auto-clear
+-- the box.  Mirrors LooteerV3's reload_catalog_toggle pattern.
+local _last_reload_state     = false
 
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
@@ -106,47 +111,59 @@ local function handle_manual_keybind(now)
     fsm.start(settings, 'manual', true, nil)
 end
 
--- Fires on either the keybind or the GUI button.  Intentionally NOT
--- gated by settings.enabled -- this is a debug aid; the user should be
--- able to dump reward options before they ever enable the plugin to
--- pick the right Reward card index.
-local function handle_dump_input(now)
-    local keybind_pressed = gui.elements.dump_rewards_keybind:get_state() == 1
-    local button_pressed  = gui.elements.dump_rewards_button:get() == true
-    if not (keybind_pressed or button_pressed) then return end
-    if (now - last_dump_t) < MANUAL_DEBOUNCE_S then return end
-    last_dump_t = now
-    if keybind_pressed then gui.elements.dump_rewards_keybind:set(false) end
-    log.info('--- reward dump (' .. (keybind_pressed and 'keybind' or 'button') .. ') ---')
-    whispers.dump_rewards()
-    log.info('--- end dump ---')
-end
+-- Dump reward options handler -- commented out for normal play.  See
+-- the corresponding GUI element / renderer comments in gui.lua to
+-- re-enable.  Logic kept here verbatim so a one-comment-block flip
+-- restores the feature.
+-- local function handle_dump_input(now)
+--     local keybind_pressed = gui.elements.dump_rewards_keybind:get_state() == 1
+--     local button_pressed  = gui.elements.dump_rewards_button:get() == true
+--     if not (keybind_pressed or button_pressed) then return end
+--     if (now - last_dump_t) < MANUAL_DEBOUNCE_S then return end
+--     last_dump_t = now
+--     if keybind_pressed then gui.elements.dump_rewards_keybind:set(false) end
+--     log.info('--- reward dump (' .. (keybind_pressed and 'keybind' or 'button') .. ') ---')
+--     whispers.dump_rewards()
+--     log.info('--- end dump ---')
+-- end
 
--- Reload Catalog button.  Debounced + intentionally NOT gated by
+-- Reload Catalog checkbox.  Edge-triggered: fires once on a
+-- false->true transition, then auto-clears the box so it visually
+-- "disarms" itself.  Debounced + intentionally NOT gated by
 -- settings.enabled -- the catalog is needed for proper classification
 -- before you'd even consider enabling the plugin.
 local function handle_reload_catalog(now)
-    if not gui.elements.reload_catalog_button:get() then return end
-    if (now - last_reload_t) < RELOAD_DEBOUNCE_S then return end
-    last_reload_t = now
-    log.info('Reload Catalog: spawning Updater.bat oneshot...')
-    local ok, source_or_err = rewards.fetch_and_reload()
-    if ok then
-        log.info('Reload Catalog: ok (source=' .. tostring(source_or_err) .. ')')
-    else
-        log.info('Reload Catalog: FAILED (' .. tostring(source_or_err) .. ')')
+    local cur = gui.elements.reload_catalog_toggle:get()
+    if cur and not _last_reload_state then
+        if (now - last_reload_t) < RELOAD_DEBOUNCE_S then
+            -- Still in debounce window from a prior click; quietly
+            -- disarm the box and ignore.
+            pcall(function () gui.elements.reload_catalog_toggle:set(false) end)
+            _last_reload_state = false
+            return
+        end
+        last_reload_t = now
+        log.info('Reload Catalog: spawning Updater.bat oneshot...')
+        local ok, source_or_err = rewards.fetch_and_reload()
+        if ok then
+            log.info('Reload Catalog: ok (source=' .. tostring(source_or_err) .. ')')
+        else
+            log.info('Reload Catalog: FAILED (' .. tostring(source_or_err) .. ')')
+        end
+        pcall(function () gui.elements.reload_catalog_toggle:set(false) end)
     end
+    _last_reload_state = gui.elements.reload_catalog_toggle:get()
 end
 
 local function main_pulse()
     settings.update(gui)
     local now = (get_time_since_inject and get_time_since_inject()) or 0
 
-    -- Debug + setup input first: dump-rewards and reload-catalog are
-    -- intentionally NOT gated by settings.enabled so the user can use
-    -- them for calibration / first-time-setup before ever enabling the
-    -- plugin.
-    handle_dump_input(now)
+    -- Setup input first: reload-catalog is intentionally NOT gated by
+    -- settings.enabled so the user can fetch the catalog before ever
+    -- enabling the plugin.  (handle_dump_input is commented out --
+    -- re-enable alongside the GUI elements when needed.)
+    -- handle_dump_input(now)
     handle_reload_catalog(now)
 
     if not settings.enabled then

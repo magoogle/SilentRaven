@@ -164,6 +164,70 @@ M.send_escape = function ()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- Skov_Temis Raven NPC navigation
+--
+-- Live-validated coordinates from the user (2026-05-09):
+--   TP arrival   : ~(2579.58, -482.19, 31.50)
+--   Intermediate : ~(2597.24, -488.08, 30.52)  -- avoids a wall on the
+--                                                 direct path to the NPC
+--   Raven NPC    : ~(2596.38, -495.79, 30.52)
+--
+-- The intermediate is needed because the NPC actor doesn't appear in
+-- the live ally stream until the player is within ~20-25 yards.  After
+-- TP arrival we're still 16+ yards away, so find_tree_npc() returns
+-- nil and the FSM has nothing to walk toward.  Walking blindly to the
+-- intermediate point closes the gap; once the NPC pops into stream the
+-- normal "walk to actor + interact" path takes over.
+--
+-- The intermediate is randomized within INTERMEDIATE_RANDOMIZE_RADIUS
+-- yards so repeated runs don't path through the exact same point.
+-- ---------------------------------------------------------------------------
+M.RAVEN_NPC_POSITION = { x = 2596.38, y = -495.79, z = 30.52 }
+M.RAVEN_INTERMEDIATE = { x = 2597.24, y = -488.08, z = 30.52 }
+
+M.INTERMEDIATE_RANDOMIZE_RADIUS = 2.0    -- yards (uniform jitter)
+M.INTERMEDIATE_ARRIVAL_RADIUS   = 3.5    -- "close enough" to advance
+
+-- Pick a randomized point within INTERMEDIATE_RANDOMIZE_RADIUS yards
+-- of the canonical intermediate.  Z stays exact (terrain is flat in
+-- this corridor).  Call once per attempt and reuse the result.
+M.choose_intermediate = function ()
+    local r  = M.INTERMEDIATE_RANDOMIZE_RADIUS
+    local dx = (math.random() * 2 - 1) * r
+    local dy = (math.random() * 2 - 1) * r
+    return {
+        x = M.RAVEN_INTERMEDIATE.x + dx,
+        y = M.RAVEN_INTERMEDIATE.y + dy,
+        z = M.RAVEN_INTERMEDIATE.z,
+    }
+end
+
+-- Walk toward a static {x, y, z} position via pathfinder.  Best-effort
+-- (silent no-op if the host doesn't expose pathfinder + vec3).
+M.move_to_pos = function (pos)
+    if not pos or not pathfinder then return end
+    if not vec3 or not vec3.new then return end
+    local p = vec3:new(pos.x, pos.y, pos.z)
+    if pathfinder.move_to_cpathfinder then
+        pcall(pathfinder.move_to_cpathfinder, p)
+    elseif pathfinder.request_move then
+        pcall(pathfinder.request_move, p)
+    end
+end
+
+-- 2D Euclidean distance from local player to a {x, y, z} position.
+-- Returns math.huge on any failure (no player, no position).
+M.player_dist_to_pos = function (pos)
+    if not pos then return math.huge end
+    local lp = get_local_player and get_local_player() or nil
+    if not lp or not lp.get_position then return math.huge end
+    local pp = lp:get_position()
+    if not pp then return math.huge end
+    local dx, dy = pos.x - pp:x(), pos.y - pp:y()
+    return math.sqrt(dx*dx + dy*dy)
+end
+
 -- True when the host exposes the proper quest_reward API.  Checked once
 -- per call so a host upgrade mid-run takes effect on the next attempt.
 M.has_quest_reward_api = function ()

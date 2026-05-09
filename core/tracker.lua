@@ -66,6 +66,7 @@ M.reset_run = function ()
     M.external_callback = nil
     M.teleport_required = false
     M.last_pick_entry   = nil
+    M.walk_intermediate = nil
 end
 
 return M

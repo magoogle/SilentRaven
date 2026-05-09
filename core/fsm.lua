@@ -32,6 +32,12 @@ local INTERACT_RANGE              = 30.0    -- D4 walks the last few yards
 local TELEPORT_TIMEOUT_S          = 30.0
 local TELEPORT_RECAST_DEBOUNCE_S  = 3.0     -- mirrors AlfredTheButler/teleport.lua
 local TELEPORT_SPELL_ID           = 186139  -- "casting town portal" anim
+-- WALK_NPC has its own (longer) timeout because right after TP the NPC
+-- actor isn't in stream yet -- we need time to walk to the static
+-- intermediate waypoint AND then to the NPC pos before bailing.
+-- INTERACT_NPC keeps the original 10s -- that's just panel-render after
+-- a successful interact.
+local WALK_NPC_TIMEOUT_S          = 20.0
 local NPC_PANEL_TIMEOUT_S         = 10.0
 local INTERACT_RETRY_INTERVAL_S   = 1.5
 local CLAIM_VERIFY_TIMEOUT_S      = 5.0
@@ -74,10 +80,13 @@ end
 -- Begin a fresh attempt.  Increments the attempt counter; the caller is
 -- responsible for setting tracker.state to whatever the next stage is.
 local function begin_attempt(settings)
-    tracker.attempts        = (tracker.attempts or 0) + 1
-    tracker.interacts_fired = 0
-    tracker.last_interact_t = nil
-    tracker.interact_npc    = nil
+    tracker.attempts          = (tracker.attempts or 0) + 1
+    tracker.interacts_fired   = 0
+    tracker.last_interact_t   = nil
+    tracker.interact_npc      = nil
+    -- Re-randomize the intermediate waypoint each attempt -- if the
+    -- last one led to a stuck path, a different point may unstick.
+    tracker.walk_intermediate = nil
     log.debug(settings, string.format('attempt %d/%d', tracker.attempts, MAX_RETRIES))
 end
 
@@ -303,23 +312,21 @@ M.tick = function (settings)
     end
 
     -- ---- WALK_NPC: moving to NPC; transition to INTERACT_NPC when close ----
+    --
+    -- Two walk targets, chosen per tick:
+    --   * NPC actor  -- if it's in the live stream, walk straight to it.
+    --   * Static fallback -- intermediate waypoint until we're close,
+    --     then the known NPC position.  Used when the actor hasn't
+    --     populated the stream yet (typical right after TP).
     if tracker.state == 'WALK_NPC' then
         local npc = tracker.interact_npc
         if not npc or not (npc.is_interactable and npc:is_interactable()) then
-            -- Re-find; the cached actor may have dropped from stream.
             npc = whispers.find_tree_npc()
             tracker.interact_npc = npc
         end
-        if not npc then
-            -- No NPC visible.  Could just be late stream populate; wait
-            -- a bit before failing.
-            if (now - (tracker.state_t or 0)) >= NPC_PANEL_TIMEOUT_S then
-                fail_or_retry(now, 'NPC never appeared in stream', settings)
-            end
-            return
-        end
-        if in_interact_range(npc) then
-            -- Fire first interact and transition.
+
+        -- In range of actor -> fire interact and transition.
+        if npc and in_interact_range(npc) then
             pcall(interact_object, npc)
             tracker.interacts_fired = 1
             tracker.last_interact_t = now
@@ -328,7 +335,35 @@ M.tick = function (settings)
             log.debug(settings, 'in range; first interact_object fired')
             return
         end
-        move_toward_actor(npc)
+
+        -- Walk: actor-driven if found, else static fallback.
+        if npc then
+            move_toward_actor(npc)
+        else
+            if not tracker.walk_intermediate then
+                tracker.walk_intermediate = whispers.choose_intermediate()
+                log.debug(settings, string.format(
+                    'NPC not in stream; walking via intermediate (%.1f, %.1f, %.1f)',
+                    tracker.walk_intermediate.x,
+                    tracker.walk_intermediate.y,
+                    tracker.walk_intermediate.z))
+            end
+            local d_int = whispers.player_dist_to_pos(tracker.walk_intermediate)
+            if d_int > whispers.INTERMEDIATE_ARRIVAL_RADIUS then
+                whispers.move_to_pos(tracker.walk_intermediate)
+            else
+                whispers.move_to_pos(whispers.RAVEN_NPC_POSITION)
+            end
+        end
+
+        -- Timeout: if the NPC still isn't in stream after we've walked
+        -- through the intermediate AND tried the NPC position, give up
+        -- this attempt.  20s gives time for ~16y walk + actor populate.
+        if (now - (tracker.state_t or 0)) >= WALK_NPC_TIMEOUT_S then
+            if not npc then
+                fail_or_retry(now, 'NPC never appeared in stream after walk', settings)
+            end
+        end
         return
     end
 

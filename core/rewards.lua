@@ -141,10 +141,13 @@ local function _plugin_dir()
         if p then candidates[#candidates + 1] = p end
     end
     for _, p in ipairs(candidates) do
+        -- p:find returns the START position of the match, which IS the
+        -- position of the leading separator we want to keep -- so
+        -- p:sub(1, cut) already includes it.  An earlier off-by-one
+        -- (cut + 1) gave "...SilentRaven\c" instead of "...SilentRaven\".
         local cut = p:find('[\\/]core[\\/]rewards%.lua$')
         if cut then
-            -- Keep the trailing separator so callers can concatenate filenames.
-            return p:sub(1, cut + 1)
+            return p:sub(1, cut)
         end
     end
     return nil

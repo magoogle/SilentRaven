@@ -95,9 +95,6 @@ function gui.render()
     gui.elements.debug_toggle:render('Debug logging',
         'Print FSM transitions to console.  Useful while diagnosing failed runs.')
 
-    gui.elements.manual_fire_keybind:render('Manual trigger keybind',
-        'Press to fire a turn-in run now (TP-to-Temis included).  Equivalent to calling SilentRavenPlugin.trigger_tasks_with_teleport(...).')
-
     -- Dump reward options renderers -- commented out (see element decls above).
     -- gui.elements.dump_rewards_keybind:render('Dump reward options (keybind)',
     --     'Bind a key, then press it with the reward panel open to print every quest_reward entry to console. Works even when the plugin is disabled.')
@@ -106,6 +103,9 @@ function gui.render()
 
     gui.elements.reload_catalog_toggle:render('Reload Catalog (cloud)',
         'Tick to run Updater.bat: fetches the latest cache catalog from looter.d4data.live and reloads it into memory. The tick auto-clears once the run completes. Use after a season patch to pick up new SNOs without editing code. Brief (~50-200ms) freeze while cmd.exe spawns; safe as a one-shot user action.')
+
+    gui.elements.manual_fire_keybind:render('Manual trigger keybind',
+        'Press to fire a turn-in run now (TP-to-Temis included).  Equivalent to calling SilentRavenPlugin.trigger_tasks_with_teleport(...).')
 
     if gui.elements.priority_tree:push('Priority pick') then
         render_menu_header('Per-slot priority weights. All default 5 (neutral). Lower a slot to deprioritize it; raise to prefer it. Legendary cards still beat non-legendary at the same priority via the bonus weight below.')

@@ -336,10 +336,11 @@ M.tick = function (settings)
             return
         end
 
-        -- Walk: actor-driven if found, else static fallback.
+        -- Walk: actor-driven if found, else static fallback (only in
+        -- zones we have coords for; other towns just wait for actor).
         if npc then
             move_toward_actor(npc)
-        else
+        elseif whispers.has_known_coords(cur_zone) then
             if not tracker.walk_intermediate then
                 tracker.walk_intermediate = whispers.choose_intermediate()
                 log.debug(settings, string.format(

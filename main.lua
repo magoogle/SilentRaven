@@ -98,10 +98,14 @@ local function maybe_autofire(now, cur_zone)
     if not whispers.in_whisper_town() then return end
     if tracker.last_zone_handled == cur_zone then return end
     if not tracker.ready then return end
-    -- Don't autofire unless we can actually see the NPC; otherwise we'd
-    -- spin in WALK_NPC retries on a freshly-loaded zone with no bounty
-    -- NPC at all (e.g. a town variant that doesn't host the Tree).
-    if not whispers.find_tree_npc() then return end
+    -- Pre-flight: we must be able to either SEE the NPC right now, OR
+    -- have hard-coded fallback coords for this zone (so WALK_NPC's
+    -- static walk can bring the NPC into stream).  Without one of
+    -- those, autofiring would just spin in WALK_NPC retries on a town
+    -- variant that doesn't host the Tree.
+    local has_actor  = whispers.find_tree_npc() ~= nil
+    local has_coords = whispers.has_known_coords(cur_zone)
+    if not (has_actor or has_coords) then return end
     fsm.start(settings, 'auto', false, nil)
 end
 

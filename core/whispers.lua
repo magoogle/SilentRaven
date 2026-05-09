@@ -189,6 +189,31 @@ M.RAVEN_INTERMEDIATE = { x = 2597.24, y = -488.08, z = 30.52 }
 M.INTERMEDIATE_RANDOMIZE_RADIUS = 2.0    -- yards (uniform jitter)
 M.INTERMEDIATE_ARRIVAL_RADIUS   = 3.5    -- "close enough" to advance
 
+-- Per-zone hard-coded NPC + intermediate coords.  Used by WALK_NPC's
+-- static fallback (when the actor isn't in stream yet) AND by
+-- maybe_autofire as the gate for "is it safe to fire here without
+-- seeing the actor first?".
+--
+-- Currently only Skov_Temis is mapped.  Hawe_TreeOfWhispers is in
+-- TOWN_ZONES but lacks coords -- autofire there will require the
+-- actor to already be in stream.
+M.ZONE_COORDS = {
+    ['Skov_Temis'] = {
+        npc_pos      = M.RAVEN_NPC_POSITION,
+        intermediate = M.RAVEN_INTERMEDIATE,
+    },
+}
+
+-- True when we have hard-coded NPC coords for the given zone.
+M.has_known_coords = function (zone)
+    return M.ZONE_COORDS[zone or ''] ~= nil
+end
+
+-- Coords for the zone the player is currently in, or nil.
+M.current_zone_coords = function ()
+    return M.ZONE_COORDS[M.current_zone() or '']
+end
+
 -- Pick a randomized point within INTERMEDIATE_RANDOMIZE_RADIUS yards
 -- of the canonical intermediate.  Z stays exact (terrain is flat in
 -- this corridor).  Call once per attempt and reuse the result.

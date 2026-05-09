@@ -2,76 +2,44 @@
 
 All notable changes to SilentRaven will be documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
-
-### Added (D4Remote dashboard integration)
-- New `core/stats.lua` module: in-memory cumulative counters (`turnins_success`, `turnins_failed`, `tp_attempts`, `legendary_claimed`, `regular_claimed`, per-slot `<slot>_claimed`, last-pick details). Persists for the lifetime of the script -- resets only on reload, mirroring Alfred / GoFish.
-- `core/fsm.lua` snapshots the picked `quest_reward` entry into `tracker.last_pick_entry` BEFORE calling `pick_and_accept`, so `finalize()` can bump per-slot + legendary counters and call `D4Remote.record_loot(category, rarity)` once the claim verifies. Slot ids are translated to D4Remote's singular vocabulary (`rings → ring`, `amulets → amulet`, `weapons_1h/2h → weapon`, etc.) via a new `SLOT_TO_D4REMOTE_CATEGORY` map in `core/rewards.lua`.
-- `main.lua` `report_to_d4remote()` builds a flat key/value payload (~30 keys covering live state, catalog freshness, cumulative counters, per-slot breakdown, last-pick details) and pushes it via `D4Remote.update_stats('SilentRaven', payload)` from `main_pulse`, throttled to 1 Hz. Reporting runs even when the plugin is disabled so the dashboard card stays visible with `status="Disabled"`.
-
-### Changed (simplification pass)
-- **Reward picking is now priority-only.** The fixed-index `Reward card index` slider is gone — the priority ranker in `core/rewards.lua` handles "which index to claim" with a built-in first-valid fallback for the all-zero edge case, so the fixed-index path was always dead-code-on-success. Auto-pick is implicit (no toggle); the GUI tree got smaller as a result.
-- **All slot priorities default to 5.** `gold` was 7 and `other` was 1; both are now 5 too. Pure neutral baseline. Legendary cards still beat non-legendary at the same priority via `legendary_bonus_weight` (default 50).
-- **Pixel-click fallback removed.** No more `Use click fallback` toggle, no calibration overlay, no four per-mille click sliders, no `CLICK_CARD` / `CLICK_ACCEPT` FSM states, no `frac_to_pixels` / `click_at_frac` helpers. If the host doesn't expose `quest_reward.pick_and_accept`, the run fails fast with a clear error in the log instead of chasing screen coordinates. Removes ~80 lines of dead-on-success code.
-
-### Removed
-- `core/settings.lua`: `reward_index`, `auto_pick_by_priority`, `use_click_fallback`, `reward_x_frac`, `reward_y_frac`, `accept_x_frac`, `accept_y_frac`, `show_calibration`.
-- `gui.lua`: `reward_index_slider`, `auto_pick_toggle`, `fallback_tree`, `use_click_fallback_toggle`, four click sliders, `show_calibration_toggle`, the entire "Click-fallback (advanced)" subtree.
-- `core/fsm.lua`: `CLICK_CARD`, `CLICK_ACCEPT` states, the `CARD_TO_ACCEPT_S` tunable, the click-fallback branch in `fire_claim`.
-- `core/whispers.lua`: `frac_to_pixels`, `click_at_frac`.
-- `main.lua`: `draw_calibration` overlay function and the `on_render` hook that called it.
-
-
-### Added (cloud catalog sync)
-- **Cloud-synced cache catalog.** `Updater.bat` (patterned on LooteerV3's) pulls `https://looter.d4data.live/d4/silentraven/caches.lua` to `data/caches.lua` next to the script. `core/rewards.lua` tries to `require 'data.caches'` first and falls back to a 21-entry embedded mini-catalog when the file is missing or malformed. `M.CATALOG_SOURCE` is exposed so the GUI header can label "cloud (synced 5m ago)" vs "embedded fallback".
-- **Reload Catalog (cloud) GUI button.** One-click run of Updater.bat oneshot + in-process reload (`package.loaded['data.caches'] = nil` then re-require). Debounced to 2s. Intentionally not gated by the master Enable toggle so users can fetch the catalog before flipping the plugin on.
-- **`Updater.bat loop` background mode** for users who want a 15-minute auto-sync without touching the GUI.
-- **Server-side: looter-d4share container** now exposes `GET /d4/silentraven/{filename}` and the daily pipeline calls `generate_silentraven_caches()` after `generate_alfred_unique_items()`. Output: 75 cache entries (Helms / Chest / Legs / Gloves / Boots / Rings / Amulets / 1H+2H Weapons / Gold / Chaos + 31 'other' boss/event/material caches), 33 (44%) flagged legendary. Live at `https://looter.d4data.live/d4/silentraven/caches.lua`.
-
-### Fixed
-- **Scoring rule update from user instruction.** Legendary entries now keep their bonus weight even when the slot priority is set to 0 — previously a `slot_priority=0` short-circuit returned score=0 immediately, so a legendary card in a "skipped" slot would have been ignored. Now: `score = slot_priority + (legendary ? bonus : 0)`. And `pick_best_index` no longer returns `nil` when nothing scores above 0; it falls back to the first valid entry per the user's "if all options are 0 and not legendary we just pick one" rule. The chosen entry is flagged `fallback=true` in the breakdown so debug logs make the fallback obvious.
-
-### Added (live-validated against second S09 dump)
-- **Catalog now ships 21 BountyMetaCache + Whisper Cache SNOs** with explicit `legendary` flags. Live dump from the user (panel open, count=4) showed:
-  - `[1] sno=2102725 BountyMeta_Cache_Gold_Upgraded` → was legendary; now classified as `slot=gold legendary=true (catalog:legendary=true)`
-  - `[2] sno=598510  BountyMeta_Cache_Chaos`         → now classified as `slot=chaos legendary=false`
-  - `[3] sno=1087557 BountyMeta_Cache_2HWeapons`     → now classified as `slot=weapons_2h` (was already correct via SNO)
-  - `[4] sno=1087555 BountyMeta_Cache_Gloves`        → unchanged
-- New `gold` and `chaos` slots in `KNOWN_SLOTS` with priority sliders (gold defaults to 7 since it's universally useful; chaos defaults to 5).
-- `_Upgraded` added to `LEGENDARY_NAME_TOKENS` for fallback name detection on cache SNOs not yet in the embedded catalog.
-- Catalog lookup is now the **first** rung of `is_legendary` — short-circuits with evidence `catalog:legendary=true|false` when the SNO is known. Heuristic field/name probes only fire for unknown SNOs.
-
-### Notes
-- The host's live entry table only carries `{sno, internal_name, valid}` — no rarity/quality/tier extras (verified by the empty `extras:` line in the dump). Catalog-by-SNO is the only reliable legendary signal until that changes; embedded mini-catalog is the fallback.
-
-### Added
-- **Priority-based reward picking.** New `core/rewards.lua` module: SNO-catalog slot mapping (lifted from LooteerV3 v20260509 — 9 known BountyMetaCache SNOs covering Helms / Chest / Legs / Gloves / Boots / Rings / Amulets / 1H Weapons / 2H Weapons), `internal_name` pattern fallback for unknown caches, multi-field legendary detection (probes `legendary`/`is_legendary`/`is_unique`/`guaranteed_legendary`/`is_ancestral`/`rarity`/`quality`/`tier`/`class`/`rank`/`r` then falls back to name-pattern matching).
-- "Auto-pick by priority" GUI toggle plus per-slot priority sliders (0..10 each) and a "Prefer legendary" toggle with adjustable bonus weight (0..100). When auto-pick is on, the FSM scores every live `enumerate()` entry and claims the winner; ties resolve to the lowest index. Falls back to the fixed `Reward card index` when scoring returns no winner (e.g. all slots set to 0).
-- "Dump reward options" GUI keybind AND button. Press/click while the reward panel is open to print every `quest_reward.enumerate()` entry to console. Works even when the plugin is disabled (debug aid). The button is the more reliable surface — no key binding required.
-- **Enhanced dump output.** Every entry now prints (a) the documented `sno / internal_name / valid` triple, (b) the parsed `slot`, (c) the legendary verdict + the evidence token explaining the decision (`field:rarity=legendary`, `name:ancestral`, etc.), and (d) every extra field on the entry — so any rarity / quality / tier field the host exposes that the API stub doesn't document will surface and we can wire it into `is_legendary`.
-- `core/whispers.lua` exposes `M.dump_rewards()` for the same purpose; safe to call any time, gracefully degrades when the host doesn't expose `quest_reward`.
-
-### Changed
-- **`Reward card index` is now 1-based, range 1-5.** First push had it 0-based with default 0, but `quest_reward.enumerate()` on this host returns 1-INDEXED keys — verified live S09 with count=4, keys [1..4], cards: `[1] BountyMeta_Cache_Helms`, `[2] BountyMeta_Cache_Legs`, `[3] BountyMeta_Cache_Rings`, `[4] BountyMeta_Cache_Rings`. The 0-based default would have silently failed `pick_and_accept(0)` and looped into FAILED retries.
-
-### Fixed
-- Dump-rewards keybind no longer requires the plugin to be enabled — moved ahead of the `settings.enabled` early-return in `main_pulse` so it works as a calibration aid before first enable.
-
 ## [0.1] — 2026-05-09
 
-First release. **Untested live** — published for in-game validation.
+First public release. Live-validated on Skov_Temis (D4 S09).
 
 ### Added
-- Standalone Tree-of-Whispers turn-in plugin for the QQT Lua host (Diablo 4).
-- Auto-fire path: detects 10/10 Grim Favor and claims automatically while the player is in `Skov_Temis` or `Hawe_TreeOfWhispers`.
-- Call-driven path: `SilentRavenPlugin` global with Alfred-shaped contract — `trigger_tasks`, `trigger_tasks_with_teleport`, `pause`, `resume`, `cancel`, `get_status`, `is_available`, `check_version`.
-- TP-to-town stage when called via `trigger_tasks_with_teleport` (Skov_Temis waypoint SNO `0x1CE51E`).
-- Reward selection via `quest_reward.pick_and_accept(reward_index)` (host API). Two-click pixel fallback for hosts without the API, with calibration overlay (`Show calibration overlay` GUI toggle) and four per-mille click sliders.
-- Per-zone latch so a finished run (success or failure) doesn't re-fire until the player leaves and re-enters the zone.
-- GUI tree branded `magoogle | SilentRaven | v0.1` with master enable, auto-fire toggle, debug logging, manual-trigger keybind, reward card index, and click-fallback calibration.
-- Console output via `[SilentRaven]` prefix; debug logging gated by GUI toggle.
+- **Standalone Tree-of-Whispers turn-in plugin** for the QQT Lua host (Diablo 4). Two trigger paths:
+  - **Auto-fire** when the player is in `Skov_Temis` or `Hawe_TreeOfWhispers` with 10/10 Grim Favor and the master toggle is on.
+  - **Call-driven** via the `SilentRavenPlugin` global (Alfred-shaped contract): `trigger_tasks(caller, callback)`, `trigger_tasks_with_teleport(caller, callback)`, `pause`/`resume`, `cancel`, `get_status`, `is_available`, `check_version`. Mirrors `AlfredTheButlerPlugin` so other scripts can interrupt themselves to claim a turn-in.
+- **TP-to-Skov_Temis** waypoint SNO `0x1CE51E` (lifted from `AlfredTheButler/core/town.lua`) when `trigger_tasks_with_teleport` is called from out of town.
+- **Static-coord pathing in Skov_Temis.** After TP arrival the bounty Raven NPC is ~16 yards away and out of the live ally stream's range. SilentRaven walks blindly via a randomized intermediate waypoint at `(2597.24, -488.08, 30.52)` then to the NPC at `(2596.38, -495.79, 30.52)` — bringing the actor into stream so the normal interact + claim flow runs. Per-attempt randomization (±2y) avoids same-spot pathing.
+- **Priority-based reward picking** (`core/rewards.lua`):
+  - 12 slot ids: `helms`, `chest`, `legs`, `gloves`, `boots`, `rings`, `amulets`, `weapons_1h`, `weapons_2h`, `gold`, `chaos`, `other`. Each gets a 0–10 GUI slider, all default 5.
+  - `Prefer legendary` toggle + `Legendary bonus weight` slider (default 50). Legendary cards score `slot_priority + bonus_weight` so they beat any non-legendary at the same slot priority. Legendary still wins even when its slot is set to 0.
+  - First-valid fallback: if every entry scores 0 (all slots set to 0 AND nothing legendary on offer), the picker grabs the first valid entry rather than refusing to claim.
+- **Cloud-synced cache catalog** (`Updater.bat` + `https://looter.d4data.live/d4/silentraven/caches.lua`):
+  - Three-tier loader: cloud-synced `data/caches.lua` → embedded fallback (21 entries) → `internal_name` pattern parsing as last resort.
+  - Server pipeline (`silentraven_export.py` running in `looter-d4share` container) regenerates the catalog daily from the master LooteerV3 catalog. Currently 75 entries spanning regular + Greater + Ancestral tiers + Whisper Cache material variants. 33 (44%) flagged legendary.
+  - GUI header shows the catalog source (`cloud` vs `embedded fallback`) and last-sync age.
+  - **Reload Catalog (cloud)** GUI checkbox: tick fires `Updater.bat oneshot`, reloads `data.caches` in-process, then auto-clears the box. Debounced 2s.
+- **D4Remote dashboard integration** (`update_stats` + `record_loot`):
+  - `core/stats.lua` keeps cumulative counters (`turnins_success`, `turnins_failed`, `tp_attempts`, `legendary_claimed`, `regular_claimed`, per-slot `<slot>_claimed`, last-pick details). Resets on script reload, same pattern as Alfred / GoFish.
+  - `report_to_d4remote()` pushes a flat ~30-key payload (live state + catalog freshness + cumulative counters + per-slot breakdown + last-pick details) every 1 Hz. Reporting runs even when the plugin is disabled so the dashboard card stays visible with `status="Disabled"`.
+  - `D4Remote.record_loot(category, rarity)` fires once per successful claim. SilentRaven slots translate to D4Remote's singular vocab via `SLOT_TO_D4REMOTE_CATEGORY` (`rings → ring`, `weapons_1h/2h → weapon`, etc.). Rarity is `5 (Legendary)` for legendary picks, `4 (Rare)` otherwise.
+- **`SilentRavenPlugin` + `PLUGIN_silent_raven`** globals — the Alfred-style entry points for caller scripts.
+- **Per-zone success/failure latch** so a finished run doesn't busy-loop the autofire gate; cleared on zone change.
+- **Console output** prefixed `[SilentRaven]`. Debug logging GUI toggle gates the per-state-transition tracing in the FSM.
 
-### Notes for first live test
-- The Skov_Temis waypoint SNO is sourced from `AlfredTheButler/core/town.lua`. Smoke-test once with `teleport_to_waypoint(0x1CE51E)` to confirm.
-- The NPC skin patterns in `core/whispers.lua` (`temis_bounty_meta_raven_npc`, etc.) are season-specific. Verify the live skin still matches; the pattern list is generic enough to cover most renaming, but Blizzard occasionally restructures.
-- Reward card order (gold / materials / gear) varies by season. Default `Reward card index = 0` picks leftmost; tweak in GUI to taste.
+### Performance / safety
+- **API-only reward selection.** Uses `quest_reward.pick_and_accept(idx)` exclusively. No pixel-click fallback — if the host doesn't expose the API, the run fails fast with a clear error rather than chasing screen coordinates.
+- **`pathfinder.request_move` for movement** (the per-frame friendly variant matching WarMachine's nav). `pathfinder.clear_stored_path()` is called on disable / cancel / FSM finalize so the bot actually stops instead of drifting to its last requested goal.
+- **All hot-path work is O(1) per frame.** The auto-fire ready-check (quest scan + actor scan) is throttled to 2 Hz when idle. D4Remote reporting is throttled to 1 Hz. `os.execute` is only invoked from the user-triggered `Reload Catalog` checkbox.
+- **`quest_reward.enumerate()` 1-indexing** confirmed live (the API stub doesn't specify); `pick_and_accept(0)` would silently fail.
+
+### Server side
+- New private repo [magoogle/looter-d4share](https://github.com/magoogle/looter-d4share) holds the FastAPI service that backs `https://looter.d4data.live`. The SilentRaven additions (`silentraven_export.py`, the patches to `pipeline.py` and `api.py`) are committed there alongside the existing Alfred / LooteerV3 publishing surfaces.
+- New endpoint `GET /d4/silentraven/{filename}` mirrors the `/d4/alfred/{filename}` pattern — path-traversal-guarded `FileResponse`, `text/plain` for Lua source.
+
+### Known limitations
+- Static-coord pathing currently only covers `Skov_Temis`. In `Hawe_TreeOfWhispers` the bot will only autofire if the NPC is already in the live actor stream.
+- Counters are in-memory; a script reload zeroes them.
+- The `Dump reward options` keybind + button were commented out for normal play after the new-season classification was confirmed working — re-enable in `gui.lua` + `main.lua` (three call-sites, all marked) when investigating future-season SNOs.

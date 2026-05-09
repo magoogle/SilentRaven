@@ -158,20 +158,6 @@ M.player_dist_sq = function (actor)
     return dx*dx + dy*dy
 end
 
-M.frac_to_pixels = function (x_frac, y_frac)
-    if not get_screen_width or not get_screen_height then return nil, nil end
-    local sw, sh = get_screen_width(), get_screen_height()
-    return math.floor(sw * (x_frac or 0)), math.floor(sh * (y_frac or 0))
-end
-
-M.click_at_frac = function (x_frac, y_frac)
-    if not utility or not utility.send_mouse_click then return false end
-    local x, y = M.frac_to_pixels(x_frac, y_frac)
-    if not x then return false end
-    utility.send_mouse_click(x, y)
-    return true
-end
-
 M.send_escape = function ()
     if utility and utility.send_key_press then
         pcall(utility.send_key_press, 0x1B)

@@ -4,6 +4,19 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 
 ## [Unreleased]
 
+### Changed (simplification pass)
+- **Reward picking is now priority-only.** The fixed-index `Reward card index` slider is gone — the priority ranker in `core/rewards.lua` handles "which index to claim" with a built-in first-valid fallback for the all-zero edge case, so the fixed-index path was always dead-code-on-success. Auto-pick is implicit (no toggle); the GUI tree got smaller as a result.
+- **All slot priorities default to 5.** `gold` was 7 and `other` was 1; both are now 5 too. Pure neutral baseline. Legendary cards still beat non-legendary at the same priority via `legendary_bonus_weight` (default 50).
+- **Pixel-click fallback removed.** No more `Use click fallback` toggle, no calibration overlay, no four per-mille click sliders, no `CLICK_CARD` / `CLICK_ACCEPT` FSM states, no `frac_to_pixels` / `click_at_frac` helpers. If the host doesn't expose `quest_reward.pick_and_accept`, the run fails fast with a clear error in the log instead of chasing screen coordinates. Removes ~80 lines of dead-on-success code.
+
+### Removed
+- `core/settings.lua`: `reward_index`, `auto_pick_by_priority`, `use_click_fallback`, `reward_x_frac`, `reward_y_frac`, `accept_x_frac`, `accept_y_frac`, `show_calibration`.
+- `gui.lua`: `reward_index_slider`, `auto_pick_toggle`, `fallback_tree`, `use_click_fallback_toggle`, four click sliders, `show_calibration_toggle`, the entire "Click-fallback (advanced)" subtree.
+- `core/fsm.lua`: `CLICK_CARD`, `CLICK_ACCEPT` states, the `CARD_TO_ACCEPT_S` tunable, the click-fallback branch in `fire_claim`.
+- `core/whispers.lua`: `frac_to_pixels`, `click_at_frac`.
+- `main.lua`: `draw_calibration` overlay function and the `on_render` hook that called it.
+
+
 ### Added (cloud catalog sync)
 - **Cloud-synced cache catalog.** `Updater.bat` (patterned on LooteerV3's) pulls `https://looter.d4data.live/d4/silentraven/caches.lua` to `data/caches.lua` next to the script. `core/rewards.lua` tries to `require 'data.caches'` first and falls back to a 21-entry embedded mini-catalog when the file is missing or malformed. `M.CATALOG_SOURCE` is exposed so the GUI header can label "cloud (synced 5m ago)" vs "embedded fallback".
 - **Reload Catalog (cloud) GUI button.** One-click run of Updater.bat oneshot + in-process reload (`package.loaded['data.caches'] = nil` then re-require). Debounced to 2s. Intentionally not gated by the master Enable toggle so users can fetch the catalog before flipping the plugin on.

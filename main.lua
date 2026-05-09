@@ -17,9 +17,10 @@
 --      Callers should poll get_status().running and yield while true.
 --
 -- The TP target is the Skov_Temis waypoint (SNO 0x1CE51E -- pulled from
--- AlfredTheButler/core/town.lua).  The reward selection prefers the
--- host's quest_reward.pick_and_accept API; falls back to fractional
--- pixel clicks calibrated via GUI sliders.
+-- AlfredTheButler/core/town.lua).  Reward selection is API-only via
+-- quest_reward.pick_and_accept(idx) where idx comes from the priority
+-- ranker in core/rewards.lua.  No pixel-click fallback: if the host
+-- doesn't expose the API, the run fails fast with a clear error.
 -- ---------------------------------------------------------------------------
 
 local gui      = require 'gui'
@@ -180,37 +181,8 @@ local function main_pulse()
     end
 end
 
-local function draw_calibration()
-    if not graphics or not graphics.line then return end
-    if not get_screen_width or not get_screen_height then return end
-    local sw, sh = get_screen_width(), get_screen_height()
-    local pts = {
-        { x = sw * settings.reward_x_frac, y = sh * settings.reward_y_frac, label = 'reward' },
-        { x = sw * settings.accept_x_frac, y = sh * settings.accept_y_frac, label = 'accept' },
-    }
-    local color = (color_yellow and color_yellow(220)) or nil
-    if not color then return end
-    for i = 1, #pts do
-        local p = pts[i]
-        local x, y = math.floor(p.x), math.floor(p.y)
-        graphics.line(vec2:new(x - 12, y), vec2:new(x + 12, y), color, 2)
-        graphics.line(vec2:new(x, y - 12), vec2:new(x, y + 12), color, 2)
-        if graphics.text_2d then
-            graphics.text_2d(p.label, vec2:new(x + 14, y - 8), 14, color)
-        end
-    end
-end
-
-local function render_pulse()
-    if not settings.enabled then return end
-    if settings.show_calibration then
-        draw_calibration()
-    end
-end
-
 on_update(main_pulse)
 on_render_menu(function () gui.render() end)
-on_render(render_pulse)
 
 -- Expose the plugin globally.  PLUGIN_silent_raven matches Alfred's
 -- legacy convention; SilentRavenPlugin is the modern name and what

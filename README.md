@@ -10,7 +10,7 @@ A standalone Tree-of-Whispers turn-in plugin for the QQT Lua host (Diablo 4). Au
 - Detects when the bounty meta-quest objective flips to "Return to the Tree of Whispers..." (10/10 Grim Favor).
 - Walks to the nearest Tree / Crow / Bounty Raven NPC in the live actor stream.
 - Re-fires `interact_object` on a 1.5 s cadence until the reward panel verifies open.
-- Claims via `quest_reward.pick_and_accept(reward_index)` (host API). Falls back to a calibrated two-click pixel sequence if the API isn't available.
+- Claims via `quest_reward.pick_and_accept(idx)` (host API). The index comes from the priority ranker — see "Priority pick" below. No pixel-click fallback: if the API isn't exposed by the host, the run fails fast with a clear error.
 - Verifies the bounty quest is gone from the log. Latches per-zone so it doesn't re-fire until you leave and come back.
 
 ## Two ways to trigger it
@@ -115,14 +115,9 @@ The GUI header shows which source loaded and the last cloud-sync age. **Reload C
 | **Auto-fire in town** | When enabled, claims turn-ins automatically while in `Skov_Temis` / `Hawe_TreeOfWhispers`. Disable to make the plugin strictly call-driven. |
 | **Debug logging** | Print FSM transitions to console. |
 | **Manual trigger keybind** | Press to fire a turn-in run now (TP-to-Temis included). |
-| **Reward card index** | 1-based fixed pick. Used when **Auto-pick by priority** is OFF. Matches the `[N]` keys from "Dump reward options". Live S09 returns 4 cards (Helms / Legs / Rings / Rings). |
-| **Auto-pick by priority** | When ON, scores every live `enumerate()` entry by per-slot priority + legendary bonus and claims the winner. When OFF, uses the fixed Reward card index. |
-| **Prefer legendary** | Adds the legendary bonus weight to cards detected as legendary. Detection probes extra fields on the live entry first, then falls back to internal_name pattern matching. |
-| **Legendary bonus weight (0-100)** | Score boost added to legendary cards. High (e.g. 100) makes any legendary outrank any non-legendary. Low (e.g. 5) only breaks ties. |
-| **Slot priorities (Helms / Chest / Legs / ...)** | 0–10 weight per slot. 0 = skip the slot entirely. Higher values win ties. |
-| **Use click fallback** | Force the two-click pixel path instead of the `quest_reward` API. Defensive — only enable if the API isn't claiming reliably on your host. |
-| **Show calibration overlay** | Render crosshairs at the configured reward + accept click points so you can dial them in without consuming a turn-in. |
-| **Reward / Accept X-Y (per-mille)** | Click points for the fallback path, expressed as 0.001 units of screen size (500 = mid-screen). Resolution-independent. |
+| **Prefer legendary** | When ON, legendary-detected cards get the bonus weight added so they outrank same-slot non-legendary entries. Detection comes from the cloud catalog (Greater / Ancestral / Material variants flagged legendary) with internal_name pattern matching as fallback. |
+| **Legendary bonus weight (0-100)** | Score boost added to legendary cards. High (e.g. 100) makes any legendary outrank any non-legendary regardless of slot. Low (e.g. 5) only breaks ties. |
+| **Slot priorities (Helms / Chest / Legs / ...)** | 0–10 weight per slot. All default 5. Lower a slot to deprioritize it; raise to prefer it. If every slot is set to 0 AND no legendaries are on offer, `pick_best_index` falls back to the first valid entry rather than refusing to claim. |
 
 ## State machine
 
@@ -144,10 +139,12 @@ INTERACT_NPC
   └── elapsed >= NPC_PANEL_TIMEOUT_S → WAIT_RETRY (or FAILED at max retries)
 
 fire_claim
+  ├── quest_reward API missing      → fail_or_retry
+  ├── pick_best_index returns nil   → fail_or_retry
   ├── quest_reward.pick_and_accept(idx) ok → API_CLAIMING
-  └── click fallback → CLICK_CARD ──(pause)──> CLICK_ACCEPT
+  └── pick_and_accept returned false → fail_or_retry
 
-API_CLAIMING / CLICK_ACCEPT
+API_CLAIMING
   ├── is_bounty_quest_present() == false → DONE
   └── timeout (CLAIM_VERIFY_TIMEOUT_S) → WAIT_RETRY (or FAILED)
 
@@ -161,8 +158,8 @@ Tunables live at the top of `core/fsm.lua`. Per-frame budget is O(1) state check
 **The plugin never auto-fires in town.**
 Open `Debug logging`, enter Skov_Temis with 10/10 favor, and watch the console. The autofire gate requires (in order): `enabled`, `auto_fire`, in-town zone, no per-zone latch, `ready` (objective text matches), and a Tree NPC visible in the actor stream. The most common miss is a zone the plugin doesn't recognize as a "whisper town" — currently only `Skov_Temis` and `Hawe_TreeOfWhispers` are listed in `core/whispers.lua`.
 
-**The reward panel opens but no card is clicked.**
-The `quest_reward` host API may not be exposed on your QQT build. Enable `Use click fallback`, then enable `Show calibration overlay` and dial the four sliders until the crosshairs sit on the leftmost reward card and the Accept button. The sliders are in per-mille (1000 = full screen), so they're resolution-independent.
+**The reward panel opens but no card is claimed.**
+The `quest_reward` host API isn't exposed by your QQT build. With debug logging on you'll see `pick_index: quest_reward.enumerate unavailable on this host` followed by retries failing. SilentRaven no longer ships a pixel-click fallback — the only path is the API. Update your QQT build to one that exposes `quest_reward.{is_open,enumerate,pick_and_accept}` (see `#api/quest_reward.lua` in the source tree).
 
 **It TPs to Temis but doesn't claim.**
 Most likely the bounty NPC isn't where the plugin expects, or its skin name doesn't match the patterns in `TREE_NPC_PATTERNS` (in `core/whispers.lua`). Run with debug logging and watch for the "NPC not yet in stream" message — if it persists for more than a few seconds, the actor isn't in the live ally stream (or its skin name has changed). Capture the live skin via your debug tools and add it to the pattern list.
@@ -175,8 +172,7 @@ Shouldn't happen — the plugin latches the zone on both success *and* failure f
 This is v0.1 — first release, untested live. Likely follow-ups after testing:
 
 - Validate Skov_Temis waypoint SNO (`0x1CE51E`) still works on current season.
-- Confirm the right `Reward card index` for the user's preferred slot. **Live S09 enumerate() output:** count=4, all gear caches: `[1] Helms`, `[2] Legs`, `[3] Rings`, `[4] Rings` (the duplicate at index 4 is a host-side quirk, not a SilentRaven bug).
-- Verify the `quest_reward.pick_and_accept` API path actually claims (vs. the click fallback being needed).
+- Verify the `quest_reward.pick_and_accept` API path actually claims live.
 - Add Hawe_TreeOfWhispers TP target as an option (currently TP-only-to-Temis).
 - Optionally honor a "safe-to-interrupt" gate similar to WarMachine's `alfred_bridge.lua` so callers don't have to wrap every trigger in their own gate.
 

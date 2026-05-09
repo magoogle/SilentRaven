@@ -6,11 +6,14 @@
 --   'WALK_NPC'       moving toward Tree NPC (live-stream actor)
 --   'INTERACT_NPC'   re-firing interact_object until panel verifies open
 --   'API_CLAIMING'   used quest_reward.pick_and_accept; verify quest gone
---   'CLICK_CARD'     fallback path: clicked reward card; pause before Accept
---   'CLICK_ACCEPT'   fallback path: clicked Accept; verify quest gone
 --   'WAIT_RETRY'     short pause between retries
 --   'DONE'           terminal success; fires callback next tick
 --   'FAILED'         terminal failure; fires callback next tick
+--
+-- Reward selection is API-only: quest_reward.pick_and_accept(idx).
+-- The pixel-click fallback path was removed -- if the host doesn't
+-- expose the API, the run fails fast with a clear error rather than
+-- chasing screen coordinates.
 --
 -- Per-frame budget: every branch is O(1) state checks plus at most one
 -- quest scan + actor scan.  No allocations in the hot path; no os.execute
@@ -30,7 +33,6 @@ local TELEPORT_RECAST_DEBOUNCE_S  = 3.0     -- mirrors AlfredTheButler/teleport.
 local TELEPORT_SPELL_ID           = 186139  -- "casting town portal" anim
 local NPC_PANEL_TIMEOUT_S         = 10.0
 local INTERACT_RETRY_INTERVAL_S   = 1.5
-local CARD_TO_ACCEPT_S            = 1.0
 local CLAIM_VERIFY_TIMEOUT_S      = 5.0
 local INTER_ATTEMPT_S             = 1.5
 local MAX_RETRIES                 = 3
@@ -93,19 +95,17 @@ local function fail_or_retry(now, reason, settings)
     tracker.state_t = now
 end
 
--- Resolve which reward index to claim.  When auto_pick_by_priority is
--- ON, scores every live enumerate() entry and returns the winner.
--- When OFF (or when scoring returns nothing > 0), falls back to the
--- fixed reward_index slider.
+-- Resolve which reward index to claim.  Always priority-based now --
+-- pick_best_index handles its own "first valid entry" fallback when
+-- nothing scores above 0, so we never need a separate fixed-index
+-- backup.  Returns (index, reason) or (nil, error_string) on failure.
 local function resolve_pick_index(settings)
-    local fixed = settings.reward_index or 1
-    if not settings.auto_pick_by_priority then return fixed, 'fixed' end
     if not (quest_reward and type(quest_reward.enumerate) == 'function') then
-        return fixed, 'fixed (enumerate unavailable)'
+        return nil, 'quest_reward.enumerate unavailable on this host'
     end
     local ok, entries = pcall(quest_reward.enumerate)
     if not ok or type(entries) ~= 'table' then
-        return fixed, 'fixed (enumerate failed)'
+        return nil, 'quest_reward.enumerate failed'
     end
     local best, score, breakdown = rewards.pick_best_index(entries, settings)
     if settings.debug then
@@ -118,38 +118,36 @@ local function resolve_pick_index(settings)
                 b.fallback and ' <-- FALLBACK' or ''))
         end
     end
-    if best then
-        if score == 0 then
-            return best, 'priority(fallback first-valid)'
-        end
-        return best, string.format('priority(score=%d)', score)
+    if not best then
+        return nil, 'no entries on offer'
     end
-    return fixed, 'fixed (no entries on offer)'
+    if score == 0 then
+        return best, 'priority(fallback first-valid)'
+    end
+    return best, string.format('priority(score=%d)', score)
 end
 
--- Try to fire the reward selection.  Prefers quest_reward.pick_and_accept;
--- falls back to fractional clicks if the API isn't on this host or the
--- user has overridden via use_click_fallback=true (defensive).
--- Sets tracker.state to either 'API_CLAIMING' (one-call API path) or
--- 'CLICK_CARD' (two-click fallback path; second click happens on next tick).
+-- Fire the reward selection via quest_reward.pick_and_accept.  No
+-- fallback -- if the API isn't available or the call fails, the
+-- attempt fails and the FSM goes through fail_or_retry.
 local function fire_claim(settings, now)
-    if whispers.has_quest_reward_api() and not settings.use_click_fallback then
-        local idx, reason = resolve_pick_index(settings)
-        local ok, ret = pcall(quest_reward.pick_and_accept, idx)
-        if ok and ret then
-            log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok [%s]', idx, reason))
-            tracker.state   = 'API_CLAIMING'
-            tracker.state_t = now
-            return
-        end
-        log.debug(settings, 'quest_reward.pick_and_accept failed -- using click fallback')
+    if not whispers.has_quest_reward_api() then
+        fail_or_retry(now, 'quest_reward API not exposed by this host', settings)
+        return
     end
-    -- Click fallback path.
-    whispers.click_at_frac(settings.reward_x_frac, settings.reward_y_frac)
-    log.debug(settings, string.format('clicked reward card at (%.2f, %.2f)',
-        settings.reward_x_frac, settings.reward_y_frac))
-    tracker.state   = 'CLICK_CARD'
-    tracker.state_t = now
+    local idx, reason = resolve_pick_index(settings)
+    if not idx then
+        fail_or_retry(now, 'pick_index: ' .. tostring(reason), settings)
+        return
+    end
+    local ok, ret = pcall(quest_reward.pick_and_accept, idx)
+    if ok and ret then
+        log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok [%s]', idx, reason))
+        tracker.state   = 'API_CLAIMING'
+        tracker.state_t = now
+        return
+    end
+    fail_or_retry(now, string.format('pick_and_accept(%d) returned %s', idx, tostring(ret)), settings)
 end
 
 -- Terminal-state finalize: fire callback, log, reset.  After this, FSM is
@@ -259,29 +257,6 @@ M.tick = function (settings)
         end
         if (now - (tracker.state_t or 0)) < CLAIM_VERIFY_TIMEOUT_S then return end
         fail_or_retry(now, 'quest still in log after API claim', settings)
-        return
-    end
-
-    -- ---- CLICK_CARD: fallback path; pause then click Accept ----
-    if tracker.state == 'CLICK_CARD' then
-        if (now - (tracker.state_t or 0)) < CARD_TO_ACCEPT_S then return end
-        whispers.click_at_frac(settings.accept_x_frac, settings.accept_y_frac)
-        log.debug(settings, string.format('clicked Accept at (%.2f, %.2f)',
-            settings.accept_x_frac, settings.accept_y_frac))
-        tracker.state   = 'CLICK_ACCEPT'
-        tracker.state_t = now
-        return
-    end
-
-    -- ---- CLICK_ACCEPT: fallback path; verify quest gone ----
-    if tracker.state == 'CLICK_ACCEPT' then
-        if not whispers.is_bounty_quest_present() then
-            tracker.state   = 'DONE'
-            tracker.state_t = now
-            return
-        end
-        if (now - (tracker.state_t or 0)) < CLAIM_VERIFY_TIMEOUT_S then return end
-        fail_or_retry(now, 'quest still in log after fallback claim', settings)
         return
     end
 

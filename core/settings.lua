@@ -12,9 +12,9 @@ local M = {
     debug              = false,
     auto_fire          = true,
 
-    -- Reward card index (0-based).  D4 ships 3 cache cards in the reward
-    -- panel; index 0 = leftmost.  Whichever you set, picks every turn-in.
-    reward_index       = 0,
+    -- Reward card index (1-based -- matches quest_reward.enumerate() keys
+    -- on this host; live-validated S09 with count=4, keys [1..4]).
+    reward_index       = 1,
 
     -- Click-fallback path.  Used only if the host doesn't expose
     -- quest_reward.pick_and_accept (older runtime).  Defaults tuned for

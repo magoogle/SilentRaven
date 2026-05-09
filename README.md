@@ -101,7 +101,7 @@ Console output is the primary observability channel. Turn on `Debug logging` to 
 | **Auto-fire in town** | When enabled, claims turn-ins automatically while in `Skov_Temis` / `Hawe_TreeOfWhispers`. Disable to make the plugin strictly call-driven. |
 | **Debug logging** | Print FSM transitions to console. |
 | **Manual trigger keybind** | Press to fire a turn-in run now (TP-to-Temis included). |
-| **Reward card index** | 0 = leftmost, 2 = rightmost. Order varies by season; verify in-game once. |
+| **Reward card index** | 1-based, matches the `[N]` keys from "Dump reward options". Live S09 returns 4 cards (Helms / Legs / Rings / Rings); count and order vary by season — dump first, then pick. |
 | **Use click fallback** | Force the two-click pixel path instead of the `quest_reward` API. Defensive — only enable if the API isn't claiming reliably on your host. |
 | **Show calibration overlay** | Render crosshairs at the configured reward + accept click points so you can dial them in without consuming a turn-in. |
 | **Reward / Accept X-Y (per-mille)** | Click points for the fallback path, expressed as 0.001 units of screen size (500 = mid-screen). Resolution-independent. |
@@ -157,7 +157,7 @@ Shouldn't happen — the plugin latches the zone on both success *and* failure f
 This is v0.1 — first release, untested live. Likely follow-ups after testing:
 
 - Validate Skov_Temis waypoint SNO (`0x1CE51E`) still works on current season.
-- Confirm the right `Reward card index` for the user's preferred reward type (Materials / Gold / Gear).
+- Confirm the right `Reward card index` for the user's preferred slot. **Live S09 enumerate() output:** count=4, all gear caches: `[1] Helms`, `[2] Legs`, `[3] Rings`, `[4] Rings` (the duplicate at index 4 is a host-side quirk, not a SilentRaven bug).
 - Verify the `quest_reward.pick_and_accept` API path actually claims (vs. the click fallback being needed).
 - Add Hawe_TreeOfWhispers TP target as an option (currently TP-only-to-Temis).
 - Optionally honor a "safe-to-interrupt" gate similar to WarMachine's `alfred_bridge.lua` so callers don't have to wrap every trigger in their own gate.

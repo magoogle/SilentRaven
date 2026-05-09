@@ -5,11 +5,14 @@ All notable changes to SilentRaven will be documented in this file. Format loose
 ## [Unreleased]
 
 ### Added
-- "Dump reward options" GUI keybind. Press while the reward panel is open to print every `quest_reward.enumerate()` entry (index, sno, internal_name, valid, currently-selected) to console. D4 ships 3-5 cards depending on season/quest, so a live dump is the most reliable way to pick the right `Reward card index`.
+- "Dump reward options" GUI keybind AND button. Press/click while the reward panel is open to print every `quest_reward.enumerate()` entry (index, sno, internal_name, valid, currently-selected) to console. Works even when the plugin is disabled (debug aid). The button is the more reliable surface — no key binding required.
 - `core/whispers.lua` exposes `M.dump_rewards()` for the same purpose; safe to call any time, gracefully degrades when the host doesn't expose `quest_reward`.
 
 ### Changed
-- `Reward card index` slider range bumped from 0-2 to 0-4 to cover the full 3-5 card spread.
+- **`Reward card index` is now 1-based, range 1-5.** First push had it 0-based with default 0, but `quest_reward.enumerate()` on this host returns 1-INDEXED keys — verified live S09 with count=4, keys [1..4], cards: `[1] BountyMeta_Cache_Helms`, `[2] BountyMeta_Cache_Legs`, `[3] BountyMeta_Cache_Rings`, `[4] BountyMeta_Cache_Rings`. The 0-based default would have silently failed `pick_and_accept(0)` and looped into FAILED retries.
+
+### Fixed
+- Dump-rewards keybind no longer requires the plugin to be enabled — moved ahead of the `settings.enabled` early-return in `main_pulse` so it works as a calibration aid before first enable.
 
 ## [0.1] — 2026-05-09
 

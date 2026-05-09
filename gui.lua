@@ -26,10 +26,12 @@ gui.elements = {
     dump_rewards_button        = button:new(get_hash(plugin_label .. '_dump_rewards_button')),
 
     reward_tree                = tree_node:new(1),
-    -- D4 can ship 3-5 reward choices depending on season / quest type.
-    -- Use the "Dump reward options" keybind to enumerate live entries
-    -- before picking an index, since order varies.
-    reward_index_slider        = si(0, 4, 0, 'reward_index'),
+    -- quest_reward.enumerate() on this host returns 1-INDEXED keys
+    -- (live-validated S09: count=4, keys [1..4]).  Slider matches the
+    -- live indexing so the GUI value passes straight to
+    -- quest_reward.pick_and_accept(idx) without translation.  Range 1-5
+    -- covers the observed 3-5 card spread.
+    reward_index_slider        = si(1, 5, 1, 'reward_index'),
 
     fallback_tree              = tree_node:new(1),
     use_click_fallback_toggle  = cb(false, 'use_click_fallback'),
@@ -70,7 +72,7 @@ function gui.render()
 
     if gui.elements.reward_tree:push('Reward selection') then
         gui.elements.reward_index_slider:render('Reward card index',
-            'Which reward card to claim (0 = leftmost). D4 ships 3-5 cards depending on season/quest; use Dump reward options above to see your live list before picking.')
+            'Which reward card to claim. Indices are 1-based and match the [N] keys printed by Dump reward options. Live S09 shows 4 cards (Helms / Legs / Rings / Rings); count and order vary by season.')
         gui.elements.reward_tree:pop()
     end
 

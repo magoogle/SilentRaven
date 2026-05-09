@@ -75,13 +75,14 @@ external.trigger_tasks_with_teleport = function (caller, callback)
 end
 
 -- Cancel any pending external trigger and any in-flight run.  Safe to
--- call mid-run.  Sends Escape to close any open reward panel before
--- resetting, so we don't strand the player in a half-open UI.
+-- call mid-run.  Sends Escape to close any open reward panel AND
+-- aborts any in-flight pathfinder movement so the bot actually stops.
 external.cancel = function (caller)
     if tracker.running or tracker.external_trigger then
         local cb = tracker.external_callback
         log.info('cancelled by ' .. tostring(caller))
         whispers.send_escape()
+        whispers.stop_movement()
         tracker.reset_run()
         if cb then pcall(cb, 'cancelled') end
     end

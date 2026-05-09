@@ -55,20 +55,22 @@ local function update_zone_latch(cur_zone)
     tracker.last_observed_zone = cur_zone
 end
 
--- Best-effort path-to-actor.  Tries pathfinder.move_to_cpathfinder first
--- (stream-friendly), then pathfinder.request_move.  No-op if neither is
--- exposed on this host.
+-- Best-effort path-to-actor.  Prefers pathfinder.request_move (the
+-- per-frame friendly "request if not already moving" variant -- same
+-- choice as WarMachine's navigator) over move_to_cpathfinder which
+-- recomputes a custom path on every call and stutters when invoked
+-- per frame.  No-op if neither is exposed on this host.
 local function move_toward_actor(actor)
     if not actor or not actor.get_position then return end
     local p = actor:get_position()
     if not p then return end
     if pathfinder then
-        if pathfinder.move_to_cpathfinder then
-            pcall(pathfinder.move_to_cpathfinder, p)
-            return
-        end
         if pathfinder.request_move then
             pcall(pathfinder.request_move, p)
+            return
+        end
+        if pathfinder.move_to_cpathfinder then
+            pcall(pathfinder.move_to_cpathfinder, p)
         end
     end
 end
@@ -185,6 +187,11 @@ end
 -- Terminal-state finalize: fire callback, log, reset.  After this, FSM is
 -- back to idle; the next tick won't re-enter any state branch.
 --
+-- Always abort any in-flight pathfinder movement here so the bot stops
+-- where it is instead of drifting to its last requested goal after the
+-- run is "over".  Prior to this, calling pathfinder.move_to_cpathfinder
+-- meant the bot kept walking even after FSM transitioned to idle.
+--
 -- Why we latch the zone on FAILURE too: without it, the autofire loop in
 -- main.lua sees `ready == true` + in-town + no latch and immediately
 -- re-fires the FSM on the next pulse, busy-looping on whatever caused
@@ -218,6 +225,7 @@ local function finalize(settings, cur_zone, success)
         stats.bump_failure(tracker.last_reason)
     end
 
+    whispers.stop_movement()
     tracker.reset_run()
     if cb then
         pcall(cb, result)

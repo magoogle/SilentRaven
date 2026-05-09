@@ -277,10 +277,13 @@ local function main_pulse()
 
     if not settings.enabled then
         -- Disabled: drop any in-flight run cleanly so we don't leave
-        -- callbacks orphaned across an enable/disable toggle.
+        -- callbacks orphaned across an enable/disable toggle, AND
+        -- abort any in-flight pathfinder movement so the bot stops
+        -- where it is instead of drifting to its last requested goal.
         if tracker.running then
             local cb = tracker.external_callback
             log.info('disabled mid-run -- aborting')
+            whispers.stop_movement()
             tracker.reset_run()
             if cb then pcall(cb, 'disabled') end
         end

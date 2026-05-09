@@ -228,16 +228,34 @@ M.choose_intermediate = function ()
     }
 end
 
--- Walk toward a static {x, y, z} position via pathfinder.  Best-effort
--- (silent no-op if the host doesn't expose pathfinder + vec3).
+-- Walk toward a static {x, y, z} position via pathfinder.
+--
+-- Prefer pathfinder.request_move over move_to_cpathfinder: per the
+-- API stub, request_move is the per-frame friendly "request to move
+-- if not already moving" variant -- the canonical QQT movement
+-- pattern (WarMachine nav uses it exclusively).  move_to_cpathfinder
+-- recomputes a custom path every call which thrashes on per-frame
+-- invocation and produces visibly slow stuttering walks.
+--
+-- Best-effort -- silent no-op if the host doesn't expose pathfinder
+-- + vec3.
 M.move_to_pos = function (pos)
     if not pos or not pathfinder then return end
     if not vec3 or not vec3.new then return end
     local p = vec3:new(pos.x, pos.y, pos.z)
-    if pathfinder.move_to_cpathfinder then
-        pcall(pathfinder.move_to_cpathfinder, p)
-    elseif pathfinder.request_move then
+    if pathfinder.request_move then
         pcall(pathfinder.request_move, p)
+    elseif pathfinder.move_to_cpathfinder then
+        pcall(pathfinder.move_to_cpathfinder, p)
+    end
+end
+
+-- Abort any in-flight pathfinding.  Used when SilentRaven disables /
+-- cancels mid-walk so the bot actually STOPS instead of carrying on
+-- to its last requested goal.
+M.stop_movement = function ()
+    if pathfinder and pathfinder.clear_stored_path then
+        pcall(pathfinder.clear_stored_path)
     end
 end
 

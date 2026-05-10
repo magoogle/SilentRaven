@@ -2,6 +2,12 @@
 
 All notable changes to SilentRaven will be documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] — 2026-05-10
+
+### Changed
+- Re-enabled the debug logging GUI control and added a Diagnostics section header so users can easily enable logging and send console output for troubleshooting.
+- Bumped the plugin version to `0.1.3` across `gui.lua`, `main.lua`, and `core/settings.lua`.
+
 ## [0.1.2] — 2026-05-09
 
 The actual fix for the two bugs that v0.1.1 misdiagnosed.

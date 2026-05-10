@@ -2,6 +2,17 @@
 
 All notable changes to SilentRaven will be documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] — 2026-05-09
+
+Bugfix release based on two live user reports:
+
+### Fixed
+- **`Material Collection of *` caches no longer treated as legendary gear.** A user with `legendary_bonus_weight=100` reported the picker grabbed `Material Collection of Gem Fragments` over a regular `Collection of Helms`. Root cause: the LooteerV3 catalog has these at `magic_type=3` (legendary *cache rarity tier*), which the classifier read as "drops legendary gear" — they're crafting-material caches. New `materials` slot covers Gem Fragments / Salvage / Keys / Primordial Dust with `legendary=false` so they don't trigger the legendary bonus. `Material Collection of Gold` stays at `slot=gold legendary=true` (gold is genuinely high-value). Added a `Materials` priority slider in the GUI defaulting to 3 (lower than the gear default of 5). Server-side fix in `silentraven_export.py` regenerated `caches.lua` with the new classification (4 entries flipped); client fallback catalog mirrors it.
+- **Two-step claim with verification telemetry.** Another user reported the bot called `pick_and_accept(3)` ("Greater Two-Handed Weapons") but actually got Gauntlets (the entry at index 4). Couldn't conclusively prove host indexing mismatch from the log alone, so `fire_claim` now uses the granular `select(idx)` → `selected_index()` → `accept()` path when the host exposes it. Logs a `WARNING:` line if `selected_index()` doesn't match the requested index, and a separate warning if the SNO at the post-select position doesn't match the SNO we intended. This will give us ground truth on the next occurrence. Falls back to single-call `pick_and_accept` when the granular API isn't available.
+
+### Added
+- New `materials` slot covering 4 Whisper Cache Material entries (Gem Fragments / Salvage / Keys / Primordial Dust). Maps to `material` in the D4Remote loot category vocabulary; `materials_claimed` counter exposed in the dashboard payload.
+
 ## [0.1] — 2026-05-09
 
 First public release. Live-validated on Skov_Temis (D4 S09).

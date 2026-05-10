@@ -65,7 +65,17 @@ local EMBEDDED_CATALOG = {
 
     [598510]  = { name = 'Collection of Chaos',         slot = 'chaos', legendary = false },
     [1092147] = { name = 'Greater Collection of Chaos', slot = 'chaos', legendary = true },
-    [2102725] = { name = 'Material Collection of Gold', slot = 'gold',  legendary = true },
+
+    -- Whisper Cache Material* family.  Gold stays legendary (high-value
+    -- currency the user almost always wants).  Other Material*
+    -- entries are crafting-material caches NOT gear -- legendary=false
+    -- so they don't outrank actual legendary GEAR caches via the
+    -- legendary bonus.
+    [2102725] = { name = 'Material Collection of Gold',           slot = 'gold',      legendary = true  },
+    [2102987] = { name = 'Material Collection of Gem Fragments',  slot = 'materials', legendary = false },
+    [2103070] = { name = 'Material Collection of Salvage',        slot = 'materials', legendary = false },
+    [2167180] = { name = 'Material Collection of Keys',           slot = 'materials', legendary = false },
+    [2622775] = { name = 'Material Collection of Primordial Dust', slot = 'materials', legendary = false },
 }
 
 -- Try to load the cloud-fetched catalog; fall back to embedded.  Wrapped
@@ -255,7 +265,7 @@ local KNOWN_SLOTS = {
     'helms', 'chest', 'legs', 'gloves', 'boots',
     'rings', 'amulets',
     'weapons_1h', 'weapons_2h',
-    'gold',  'chaos',
+    'gold',  'chaos',  'materials',
     'other',
 }
 M.KNOWN_SLOTS = KNOWN_SLOTS
@@ -273,6 +283,7 @@ M.SLOT_DISPLAY = {
     weapons_2h  = 'Two-Hand Weapons',
     gold        = 'Gold (currency cache)',
     chaos       = 'Chaos (wildcard gear)',
+    materials   = 'Materials (gem fragments / keys / etc.)',
     other       = 'Other / Unknown',
 }
 
@@ -292,6 +303,7 @@ M.SLOT_TO_D4REMOTE_CATEGORY = {
     weapons_2h  = 'weapon',
     gold        = 'gold',
     chaos       = 'cache',
+    materials   = 'material',
     other       = 'cache',
 }
 

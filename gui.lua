@@ -1,7 +1,7 @@
 -- gui.lua  --  user-facing settings tree + version label
 
 local plugin_label   = 'silent_raven'
-local plugin_version = '0.1'
+local plugin_version = '0.1.1'
 local plugin_author  = 'magoogle'
 
 -- Lazy-required so a malformed core/rewards.lua doesn't kill the GUI
@@ -61,6 +61,7 @@ gui.elements = {
     priority_weapons_2h_slider = si(0, 10, 5, 'pri_weapons_2h'),
     priority_gold_slider       = si(0, 10, 5, 'pri_gold'),
     priority_chaos_slider      = si(0, 10, 5, 'pri_chaos'),
+    priority_materials_slider  = si(0, 10, 3, 'pri_materials'),
     priority_other_slider      = si(0, 10, 5, 'pri_other'),
 }
 
@@ -125,6 +126,7 @@ function gui.render()
         gui.elements.priority_weapons_2h_slider:render('Two-Hand Weapons',  'Priority weight for Collection of Two-Handed Weapons (sno 1087557 / Greater 1092140 / Ancestral 2156380).')
         gui.elements.priority_gold_slider      :render('Gold (currency)',   'Priority weight for the gold cache (Material Collection of Gold, sno 2102725 -- always legendary).')
         gui.elements.priority_chaos_slider     :render('Chaos (wildcard)',  'Priority weight for random-gear Chaos caches (sno 598510 / Greater 1092147 / Ancestral 2156388).')
+        gui.elements.priority_materials_slider :render('Materials',         'Priority weight for crafting-material caches (Gem Fragments / Keys / Salvage / Primordial Dust). Defaults to 3 because these are NOT gear caches and shouldn\'t outrank actual legendary gear via the legendary bonus.')
         gui.elements.priority_other_slider     :render('Other / Unknown',   'Priority weight for any cache that doesn\'t match a known slot (defensive against future-season caches).')
         gui.elements.priority_tree:pop()
     end

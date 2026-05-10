@@ -31,6 +31,7 @@ local M = {
     weapons_2h_claimed  = 0,
     gold_claimed        = 0,
     chaos_claimed       = 0,
+    materials_claimed   = 0,
     other_claimed       = 0,
 
     -- Most recent claim outcome.

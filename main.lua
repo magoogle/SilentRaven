@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.1
+-- SilentRaven  --  magoogle  --  v0.1.1
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -209,6 +209,7 @@ local function build_d4remote_payload()
         weapons_2h_claimed   = stats.weapons_2h_claimed,
         gold_claimed         = stats.gold_claimed,
         chaos_claimed        = stats.chaos_claimed,
+        materials_claimed    = stats.materials_claimed,
         other_claimed        = stats.other_claimed,
 
         -- Last claim
@@ -321,7 +322,7 @@ SilentRavenPlugin   = external
 
 -- Register with D4Remote dashboard if present (best-effort, non-blocking).
 if D4Remote and D4Remote.register then
-    pcall(function () D4Remote.register('SilentRaven', '0.1') end)
+    pcall(function () D4Remote.register('SilentRaven', '0.1.1') end)
 end
 
-log.info('loaded magoogle | SilentRaven | v0.1')
+log.info('loaded magoogle | SilentRaven | v0.1.1')

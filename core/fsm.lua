@@ -139,12 +139,22 @@ local function resolve_pick_index(settings)
     return best, string.format('priority(score=%d)', score)
 end
 
--- Fire the reward selection via quest_reward.pick_and_accept.  No
--- fallback -- if the API isn't available or the call fails, the
--- attempt fails and the FSM goes through fail_or_retry.
+-- Fire the reward selection.  Two-step (select + verify + accept)
+-- whenever the host exposes the granular API; falls back to the
+-- single-call pick_and_accept(idx) when it doesn't.
 --
--- Also caches the picked entry on tracker so finalize() can bump the
--- per-slot / legendary counters in core.stats once the claim verifies.
+-- Why two-step:  one user reported a mismatch where pick_and_accept(3)
+-- ostensibly succeeded ("ok [priority(score=108)]") but the in-game
+-- result was the entry at index 4.  Could be host indexing weirdness
+-- or could be a misread by the user; either way, by calling
+-- quest_reward.select(idx) and then comparing selected_index() to idx
+-- we get ground-truth telemetry on whether the host accepted the
+-- index we asked for.  Also lets us match by SNO as a backup for the
+-- "host re-orders entries between calls" hypothesis.
+--
+-- Caches the picked entry on tracker BEFORE accepting so finalize()
+-- has slot/legendary/name available even if the post-claim
+-- enumerate() returns differently after the host advances state.
 local function fire_claim(settings, now)
     if not whispers.has_quest_reward_api() then
         fail_or_retry(now, 'quest_reward API not exposed by this host', settings)
@@ -156,21 +166,84 @@ local function fire_claim(settings, now)
         return
     end
 
-    -- Snapshot the entry NOW (before pick_and_accept) so we have the
-    -- slot/legendary/name available for stats even if the post-claim
-    -- enumerate() returns differently after the host advances state.
+    -- Snapshot the entry NOW (before claim) so we have the slot /
+    -- legendary / name / sno cached for both the stats bump and the
+    -- post-select sno verification below.
     local entries_ok, entries = pcall(quest_reward.enumerate)
+    local intended_sno = nil
     if entries_ok and type(entries) == 'table' and entries[idx] then
         local e = entries[idx]
         tracker.last_pick_entry = {
             slot      = rewards.extract_slot(e),
             legendary = rewards.is_legendary(e),
             name      = rewards.display_name(e),
+            sno       = e.sno,
         }
+        intended_sno = e.sno
     else
         tracker.last_pick_entry = nil
     end
 
+    -- Two-step path: select + verify + accept.
+    if type(quest_reward.select) == 'function'
+        and type(quest_reward.accept) == 'function'
+    then
+        local sel_ok, sel_ret = pcall(quest_reward.select, idx)
+        if not (sel_ok and sel_ret) then
+            tracker.last_pick_entry = nil
+            fail_or_retry(now,
+                string.format('select(%d) returned %s', idx, tostring(sel_ret)),
+                settings)
+            return
+        end
+
+        -- Verify: does selected_index actually match what we asked
+        -- for, AND does the entry at selected_index have the SNO we
+        -- intended?  Either mismatch means the host re-ordered or
+        -- indexed differently than enumerate -- log loudly so the
+        -- user can see ground truth in the console.
+        local sel_idx = -1
+        if type(quest_reward.selected_index) == 'function' then
+            local ok2, ret2 = pcall(quest_reward.selected_index)
+            if ok2 and type(ret2) == 'number' then sel_idx = ret2 end
+        end
+
+        local verified_sno = nil
+        local verify_ok, verify_entries = pcall(quest_reward.enumerate)
+        if verify_ok and type(verify_entries) == 'table' and sel_idx ~= -1 then
+            local ve = verify_entries[sel_idx]
+            if ve then verified_sno = ve.sno end
+        end
+
+        if sel_idx ~= idx then
+            log.info(string.format(
+                'WARNING: select(%d) -> selected_index=%d (host indexing mismatch?)',
+                idx, sel_idx))
+        end
+        if intended_sno and verified_sno and intended_sno ~= verified_sno then
+            log.info(string.format(
+                'WARNING: intended sno=%d but selected_index points at sno=%d',
+                intended_sno, verified_sno))
+        end
+
+        local acc_ok, acc_ret = pcall(quest_reward.accept)
+        if acc_ok and acc_ret then
+            log.debug(settings, string.format(
+                'quest_reward.select(%d)+accept ok [%s] selected_index=%d sno=%s',
+                idx, reason, sel_idx, tostring(verified_sno)))
+            tracker.state   = 'API_CLAIMING'
+            tracker.state_t = now
+            return
+        end
+        tracker.last_pick_entry = nil
+        fail_or_retry(now,
+            string.format('accept() returned %s after select(%d)',
+                tostring(acc_ret), idx),
+            settings)
+        return
+    end
+
+    -- Fallback path: single-call pick_and_accept (older host API).
     local ok, ret = pcall(quest_reward.pick_and_accept, idx)
     if ok and ret then
         log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok [%s]', idx, reason))
@@ -178,8 +251,6 @@ local function fire_claim(settings, now)
         tracker.state_t = now
         return
     end
-    -- Pick failed at the API level -- discard the snapshot so finalize
-    -- doesn't credit it as claimed.
     tracker.last_pick_entry = nil
     fail_or_retry(now, string.format('pick_and_accept(%d) returned %s', idx, tostring(ret)), settings)
 end

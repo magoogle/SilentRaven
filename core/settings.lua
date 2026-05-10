@@ -2,7 +2,7 @@
 
 local M = {
     plugin_label   = 'silent_raven',
-    plugin_version = '0.1',
+    plugin_version = '0.1.1',
     plugin_author  = 'magoogle',
 
     -- Skov_Temis waypoint SNO.  Pulled from AlfredTheButler/core/town.lua.
@@ -38,6 +38,10 @@ local M = {
         weapons_2h = 5,
         gold       = 5,
         chaos      = 5,
+        -- Materials (gem fragments / keys / salvage / primordial dust)
+        -- default lower than gear -- they're crafting-material caches,
+        -- not equipment.  User can raise if they're farming materials.
+        materials  = 3,
         other      = 5,
     },
 }
@@ -64,6 +68,7 @@ M.update = function (gui)
     if g.priority_weapons_2h_slider then M.slot_priorities.weapons_2h = g.priority_weapons_2h_slider:get() end
     if g.priority_gold_slider       then M.slot_priorities.gold       = g.priority_gold_slider:get()       end
     if g.priority_chaos_slider      then M.slot_priorities.chaos      = g.priority_chaos_slider:get()      end
+    if g.priority_materials_slider  then M.slot_priorities.materials  = g.priority_materials_slider:get() end
     if g.priority_other_slider      then M.slot_priorities.other      = g.priority_other_slider:get()      end
 end
 

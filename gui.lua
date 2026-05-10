@@ -1,7 +1,7 @@
 -- gui.lua  --  user-facing settings tree + version label
 
 local plugin_label   = 'silent_raven'
-local plugin_version = '0.1.2'
+local plugin_version = '0.1.3'
 local plugin_author  = 'magoogle'
 
 -- Lazy-required so a malformed core/rewards.lua doesn't kill the GUI

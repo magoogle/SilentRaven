@@ -93,8 +93,9 @@ function gui.render()
     gui.elements.auto_fire_toggle:render('Auto-fire in town',
         'When enabled, SilentRaven claims any ready whisper bounty whenever the player is in Skov_Temis or Hawe_TreeOfWhispers.  Disable to make this script strictly call-driven.')
 
+    render_menu_header('Diagnostics')
     gui.elements.debug_toggle:render('Debug logging',
-        'Print FSM transitions to console.  Useful while diagnosing failed runs.')
+        'Enable before reproducing the issue and send the console output to the developer. Prints FSM transitions to console while diagnosing failed runs.')
 
     -- Dump reward options renderers -- commented out (see element decls above).
     -- gui.elements.dump_rewards_keybind:render('Dump reward options (keybind)',

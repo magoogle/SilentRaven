@@ -66,16 +66,15 @@ local EMBEDDED_CATALOG = {
     [598510]  = { name = 'Collection of Chaos',         slot = 'chaos', legendary = false },
     [1092147] = { name = 'Greater Collection of Chaos', slot = 'chaos', legendary = true },
 
-    -- Whisper Cache Material* family.  Gold stays legendary (high-value
-    -- currency the user almost always wants).  Other Material*
-    -- entries are crafting-material caches NOT gear -- legendary=false
-    -- so they don't outrank actual legendary GEAR caches via the
-    -- legendary bonus.
-    [2102725] = { name = 'Material Collection of Gold',           slot = 'gold',      legendary = true  },
-    [2102987] = { name = 'Material Collection of Gem Fragments',  slot = 'materials', legendary = false },
-    [2103070] = { name = 'Material Collection of Salvage',        slot = 'materials', legendary = false },
-    [2167180] = { name = 'Material Collection of Keys',           slot = 'materials', legendary = false },
-    [2622775] = { name = 'Material Collection of Primordial Dust', slot = 'materials', legendary = false },
+    -- Whisper Cache Material* family.  All show as legendary (orange)
+    -- in D4's reward UI -- legendary=true matches the visual tier.
+    -- Slot=materials (vs slot=other) lets the user weight materials
+    -- independently from generic unknown caches.
+    [2102725] = { name = 'Material Collection of Gold',            slot = 'gold',      legendary = true },
+    [2102987] = { name = 'Material Collection of Gem Fragments',   slot = 'materials', legendary = true },
+    [2103070] = { name = 'Material Collection of Salvage',         slot = 'materials', legendary = true },
+    [2167180] = { name = 'Material Collection of Keys',            slot = 'materials', legendary = true },
+    [2622775] = { name = 'Material Collection of Primordial Dust', slot = 'materials', legendary = true },
 }
 
 -- Try to load the cloud-fetched catalog; fall back to embedded.  Wrapped

@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.1.1
+-- SilentRaven  --  magoogle  --  v0.1.2
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -322,7 +322,7 @@ SilentRavenPlugin   = external
 
 -- Register with D4Remote dashboard if present (best-effort, non-blocking).
 if D4Remote and D4Remote.register then
-    pcall(function () D4Remote.register('SilentRaven', '0.1.1') end)
+    pcall(function () D4Remote.register('SilentRaven', '0.1.2') end)
 end
 
-log.info('loaded magoogle | SilentRaven | v0.1.1')
+log.info('loaded magoogle | SilentRaven | v0.1.2')

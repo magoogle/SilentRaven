@@ -2,6 +2,16 @@
 
 All notable changes to SilentRaven will be documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] — 2026-05-09
+
+The actual fix for the two bugs that v0.1.1 misdiagnosed.
+
+### Fixed
+- **Off-by-one in `pick_and_accept` / `select`.** A user-supplied screenshot of the live reward UI proved that both `Material Collection of Keys` and `Greater Collection of Two-Handed Weapons` are colored **orange (legendary)** in D4 — meaning the original "non-legendary was selected" complaint was about the picker getting the wrong card *visually*, not a wrong rarity classification. Both reports had `pick_and_accept(3)` ostensibly succeed but the user got the entry at `enumerate()[4]`. Conclusion: on this host, **`enumerate()` keys are 1-indexed but `pick_and_accept(N)` and `select(N)` are 0-indexed.** Two related host functions, two different conventions, neither documented in the API stub. SilentRaven now subtracts 1 before calling `select` / `pick_and_accept` and verifies post-`select` by reading `selected_index()` and comparing the SNO at the selected position to the SNO we intended.
+
+### Changed (revert from v0.1.1)
+- **Material Collection of *** caches restored to `legendary=true`. The v0.1.1 reclassification was based on a wrong diagnosis — those caches genuinely show as legendary (orange) in D4's UI. The `slot=materials` separation introduced in v0.1.1 is kept (so users can still independently weight materials vs gear via the slider), but rarity now matches D4's display tier.
+
 ## [0.1.1] — 2026-05-09
 
 Bugfix release based on two live user reports:

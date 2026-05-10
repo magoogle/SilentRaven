@@ -139,18 +139,30 @@ local function resolve_pick_index(settings)
     return best, string.format('priority(score=%d)', score)
 end
 
--- Fire the reward selection.  Two-step (select + verify + accept)
--- whenever the host exposes the granular API; falls back to the
--- single-call pick_and_accept(idx) when it doesn't.
+-- Fire the reward selection.
 --
--- Why two-step:  one user reported a mismatch where pick_and_accept(3)
--- ostensibly succeeded ("ok [priority(score=108)]") but the in-game
--- result was the entry at index 4.  Could be host indexing weirdness
--- or could be a misread by the user; either way, by calling
--- quest_reward.select(idx) and then comparing selected_index() to idx
--- we get ground-truth telemetry on whether the host accepted the
--- index we asked for.  Also lets us match by SNO as a backup for the
--- "host re-orders entries between calls" hypothesis.
+-- Indexing wart on this host:  enumerate() returns a 1-indexed table
+-- ([1]=first card, [2]=second, ...), but pick_and_accept(N) and
+-- select(N) are 0-INDEXED -- pick_and_accept(0) claims the first
+-- card, pick_and_accept(3) claims the FOURTH card.  Two related
+-- functions, two different conventions.
+--
+-- Confirmed by two live user reports + a screenshot of the reward UI:
+--   * Report 1: enumerate [3]=Gem Fragments (legendary), bot called
+--     pick_and_accept(3), user got Helms (entry [4], non-legendary).
+--   * Report 2: enumerate [3]=Greater 2H Weapons (legendary), bot
+--     called pick_and_accept(3), user got Gauntlets (entry [4]).
+-- Both are exactly the same off-by-one: the host accepted the index
+-- after the one we passed.
+--
+-- Fix: subtract 1 when calling select/pick_and_accept.  We keep the
+-- 1-indexed view for the entries table (which IS what enumerate
+-- returns) and only flip to 0-based at the host-API call site.
+--
+-- Verification: post-select we read selected_index() and pull the SNO
+-- of the entry the host CLAIMS is now selected.  If our intended SNO
+-- doesn't match, log a clear WARNING -- so if some future host has a
+-- third indexing variant we'll spot it instantly.
 --
 -- Caches the picked entry on tracker BEFORE accepting so finalize()
 -- has slot/legendary/name available even if the post-claim
@@ -165,6 +177,9 @@ local function fire_claim(settings, now)
         fail_or_retry(now, 'pick_index: ' .. tostring(reason), settings)
         return
     end
+
+    -- 0-indexed argument for the host's select/pick_and_accept.
+    local zero_idx = idx - 1
 
     -- Snapshot the entry NOW (before claim) so we have the slot /
     -- legendary / name / sno cached for both the stats bump and the
@@ -184,53 +199,52 @@ local function fire_claim(settings, now)
         tracker.last_pick_entry = nil
     end
 
-    -- Two-step path: select + verify + accept.
+    -- Pull the SNO at the post-select position so we can verify the
+    -- host actually selected what we asked for.  Tries both indexing
+    -- conventions defensively (we BELIEVE selected_index is 0-based
+    -- on this host but a future host may differ).
+    local function verified_sno_after_select(sel_idx)
+        if sel_idx == nil or sel_idx < 0 then return nil end
+        local ve_ok, ve_entries = pcall(quest_reward.enumerate)
+        if not (ve_ok and type(ve_entries) == 'table') then return nil end
+        -- Try sel_idx + 1 first (host returned 0-based selected_index;
+        -- enumerate is 1-based) then sel_idx (1-based selected_index).
+        if ve_entries[sel_idx + 1] then return ve_entries[sel_idx + 1].sno end
+        if ve_entries[sel_idx]     then return ve_entries[sel_idx].sno     end
+        return nil
+    end
+
+    -- Two-step path: select(zero_idx) + verify + accept.
     if type(quest_reward.select) == 'function'
         and type(quest_reward.accept) == 'function'
     then
-        local sel_ok, sel_ret = pcall(quest_reward.select, idx)
+        local sel_ok, sel_ret = pcall(quest_reward.select, zero_idx)
         if not (sel_ok and sel_ret) then
             tracker.last_pick_entry = nil
             fail_or_retry(now,
-                string.format('select(%d) returned %s', idx, tostring(sel_ret)),
+                string.format('select(%d) returned %s', zero_idx, tostring(sel_ret)),
                 settings)
             return
         end
 
-        -- Verify: does selected_index actually match what we asked
-        -- for, AND does the entry at selected_index have the SNO we
-        -- intended?  Either mismatch means the host re-ordered or
-        -- indexed differently than enumerate -- log loudly so the
-        -- user can see ground truth in the console.
         local sel_idx = -1
         if type(quest_reward.selected_index) == 'function' then
             local ok2, ret2 = pcall(quest_reward.selected_index)
             if ok2 and type(ret2) == 'number' then sel_idx = ret2 end
         end
 
-        local verified_sno = nil
-        local verify_ok, verify_entries = pcall(quest_reward.enumerate)
-        if verify_ok and type(verify_entries) == 'table' and sel_idx ~= -1 then
-            local ve = verify_entries[sel_idx]
-            if ve then verified_sno = ve.sno end
-        end
-
-        if sel_idx ~= idx then
+        local v_sno = verified_sno_after_select(sel_idx)
+        if intended_sno and v_sno and intended_sno ~= v_sno then
             log.info(string.format(
-                'WARNING: select(%d) -> selected_index=%d (host indexing mismatch?)',
-                idx, sel_idx))
-        end
-        if intended_sno and verified_sno and intended_sno ~= verified_sno then
-            log.info(string.format(
-                'WARNING: intended sno=%d but selected_index points at sno=%d',
-                intended_sno, verified_sno))
+                'WARNING: intended sno=%d but selected_index=%d points at sno=%d',
+                intended_sno, sel_idx, v_sno))
         end
 
         local acc_ok, acc_ret = pcall(quest_reward.accept)
         if acc_ok and acc_ret then
             log.debug(settings, string.format(
-                'quest_reward.select(%d)+accept ok [%s] selected_index=%d sno=%s',
-                idx, reason, sel_idx, tostring(verified_sno)))
+                'select(%d)+accept ok [enumerate idx=%d, %s] selected_index=%d sno=%s',
+                zero_idx, idx, reason, sel_idx, tostring(v_sno)))
             tracker.state   = 'API_CLAIMING'
             tracker.state_t = now
             return
@@ -238,21 +252,23 @@ local function fire_claim(settings, now)
         tracker.last_pick_entry = nil
         fail_or_retry(now,
             string.format('accept() returned %s after select(%d)',
-                tostring(acc_ret), idx),
+                tostring(acc_ret), zero_idx),
             settings)
         return
     end
 
     -- Fallback path: single-call pick_and_accept (older host API).
-    local ok, ret = pcall(quest_reward.pick_and_accept, idx)
+    -- Same 0-indexed argument.
+    local ok, ret = pcall(quest_reward.pick_and_accept, zero_idx)
     if ok and ret then
-        log.debug(settings, string.format('quest_reward.pick_and_accept(%d) ok [%s]', idx, reason))
+        log.debug(settings, string.format(
+            'pick_and_accept(%d) ok [enumerate idx=%d, %s]', zero_idx, idx, reason))
         tracker.state   = 'API_CLAIMING'
         tracker.state_t = now
         return
     end
     tracker.last_pick_entry = nil
-    fail_or_retry(now, string.format('pick_and_accept(%d) returned %s', idx, tostring(ret)), settings)
+    fail_or_retry(now, string.format('pick_and_accept(%d) returned %s', zero_idx, tostring(ret)), settings)
 end
 
 -- Terminal-state finalize: fire callback, log, reset.  After this, FSM is
